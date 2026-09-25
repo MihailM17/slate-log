@@ -5,8 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Slate Log — Scene & take tracker</title>
 <link rel="icon" type="image/png" href="icon.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fonts/fonts.css">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -40,11 +39,6 @@
   </aside>
 
   <main class="main">
-    <div id="empty-state" class="empty hidden">
-      <h2>No project yet</h2>
-      <p>Create your first project — film name, director and camera op — then add scenes.</p>
-      <button id="btn-first-project" class="btn primary">+ New project</button>
-    </div>
     <div id="project-view">
     <header class="topbar">
       <div>
@@ -63,9 +57,7 @@
     <section class="card">
       <div class="card-head"><strong>Log this take</strong><span class="tc">TC in&nbsp; <b id="tc-now">--:--:--</b><input id="take-tc" class="tc-input hidden" maxlength="8" placeholder="HH:MM:SS" title="Manual timecode — enable in settings"></span></div>
       <div class="take-row">
-        <button id="take-minus" class="round">−</button>
-        <div class="take-num"><span>TAKE</span><b id="take-no">01</b></div>
-        <button id="take-plus" class="round">+</button>
+        <div class="take-num"><span>NEXT TAKE</span><b id="take-no">01</b></div>
         <div class="seg rating" id="seg-rating">
           <button data-v="Bad" title="Bad = unusable, do not use in edit">Bad</button>
           <button data-v="Maybe" title="Maybe = backup, keep for review">Maybe</button>

@@ -189,6 +189,13 @@ fn connect(app: &AppHandle) -> rusqlite::Result<Connection> {
     let _ = conn.execute("ALTER TABLE scenes ADD COLUMN day INTEGER NOT NULL DEFAULT 1", []);
     let _ = conn.execute("ALTER TABLE takes ADD COLUMN day INTEGER NOT NULL DEFAULT 1", []);
     let _ = conn.execute("ALTER TABLE scenes ADD COLUMN location TEXT NOT NULL DEFAULT ''", []);
+    // One "14" per project. May fail on DBs that already contain duplicates
+    // from the unconstrained era — the app-level checks below still guard
+    // all new writes either way.
+    let _ = conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_scenes_project_number ON scenes(project_id, number)",
+        [],
+    );
     // Rating rename: NG -> Bad, Hold -> Maybe, Print -> Good
     let _ = conn.execute("UPDATE takes SET rating='Bad' WHERE rating='NG'", []);
     let _ = conn.execute("UPDATE takes SET rating='Maybe' WHERE rating='Hold'", []);
@@ -241,9 +248,42 @@ fn migrate_orphans(conn: &Connection) -> rusqlite::Result<()> {
 }
 
 pub fn ensure_schema(app: &AppHandle) {
+    // Back up first so a failed migration can never eat the shoot.
+    backup_db(app);
     if let Ok(conn) = connect(app) {
         // Touch tables so fresh installs start with empty projects/scenes.
         let _ : rusqlite::Result<i64> = conn.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0));
+    }
+}
+
+/// Timestamped copy of the database on every launch; keeps the newest 10.
+/// Lives next to the live DB: <app_data>/backups/slate-log-YYYYMMDD-HHMMSS.db
+pub fn backup_db(app: &AppHandle) {
+    let path = db_path(app);
+    let Ok(meta) = std::fs::metadata(&path) else { return };
+    if meta.len() == 0 {
+        return;
+    }
+    let dir = path.parent().map(|p| p.join("backups")).unwrap_or_else(|| PathBuf::from("backups"));
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let dest = dir.join(format!("slate-log-{stamp}.db"));
+    if std::fs::copy(&path, &dest).is_err() {
+        return;
+    }
+    // Prune oldest, keep 10.
+    if let Ok(files) = std::fs::read_dir(&dir) {
+        let mut names: Vec<String> = files
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.starts_with("slate-log-") && n.ends_with(".db"))
+            .collect();
+        names.sort();
+        for old in names.iter().take(names.len().saturating_sub(10)) {
+            let _ = std::fs::remove_file(dir.join(old));
+        }
     }
 }
 
@@ -380,9 +420,24 @@ pub fn fetch_scenes(app: &AppHandle, project_id: i64) -> rusqlite::Result<Vec<Sc
     rows.collect()
 }
 
+fn scene_number_taken(conn: &Connection, project_id: i64, number: &str, except_id: Option<i64>) -> bool {
+    conn.query_row(
+        "SELECT COUNT(*) FROM scenes WHERE project_id=?1 AND number=?2 AND (?3 IS NULL OR id != ?3)",
+        params![project_id, number, except_id],
+        |r| r.get::<_, i64>(0),
+    )
+    .map(|c| c > 0)
+    .unwrap_or(false)
+}
+
 pub fn insert_scene(app: &AppHandle, project_id: i64, s: NewScene) -> rusqlite::Result<Scene> {
     let conn = connect(app)?;
-    conn.execute(
+    if scene_number_taken(&conn, project_id, &s.number, None) {
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE),
+            Some(format!("Scene {} already exists in this project", s.number)),
+        ));
+    }    conn.execute(
         "INSERT INTO scenes (project_id, number, title, int_ext, daypart, day, location, description, camera_default) VALUES (?,?,?,?,?,?,?,?,?)",
         params![project_id, s.number, s.title, s.int_ext, s.daypart, s.day, s.location, s.description, s.camera_default],
     )?;
@@ -392,7 +447,13 @@ pub fn insert_scene(app: &AppHandle, project_id: i64, s: NewScene) -> rusqlite::
 
 pub fn update_scene(app: &AppHandle, id: i64, s: NewScene) -> rusqlite::Result<()> {
     let conn = connect(app)?;
-    conn.execute(
+    let project_id: i64 = conn.query_row("SELECT project_id FROM scenes WHERE id=?1", params![id], |r| r.get(0))?;
+    if scene_number_taken(&conn, project_id, &s.number, Some(id)) {
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE),
+            Some(format!("Scene {} already exists in this project", s.number)),
+        ));
+    }    conn.execute(
         "UPDATE scenes SET number=?1, title=?2, int_ext=?3, daypart=?4, day=?5, location=?6, description=?7, camera_default=?8 WHERE id=?9",
         params![s.number, s.title, s.int_ext, s.daypart, s.day, s.location, s.description, s.camera_default, id],
     )?;
@@ -410,31 +471,16 @@ pub fn remove_scene(app: &AppHandle, id: i64) -> rusqlite::Result<()> {
 
 pub fn fetch_takes(app: &AppHandle, scene_id: i64) -> rusqlite::Result<Vec<Take>> {
     let conn = connect(app)?;
-    // Older DBs may lack int_ext until migration runs inside connect(); select defensively.
-    let has_col: bool = conn
-        .prepare("SELECT int_ext FROM takes LIMIT 0")
-        .is_ok();
-    let sql = if has_col {
-        "SELECT id, scene_id, take_no, tc_in, cam, lens, rating, int_ext, day, tags, note, created_at FROM takes WHERE scene_id=?1 ORDER BY take_no"
-    } else {
-        "SELECT id, scene_id, take_no, tc_in, cam, lens, rating, tags, note, created_at FROM takes WHERE scene_id=?1 ORDER BY take_no"
-    };
-    let mut stmt = conn.prepare(sql)?;
+    // connect() always runs the int_ext/day migrations first, so the column exists.
+    let mut stmt = conn.prepare(
+        "SELECT id, scene_id, take_no, tc_in, cam, lens, rating, int_ext, day, tags, note, created_at FROM takes WHERE scene_id=?1 ORDER BY take_no",
+    )?;
     let rows = stmt.query_map(params![scene_id], |r| {
-        if has_col {
-            Ok(Take {
-                id: r.get(0)?, scene_id: r.get(1)?, take_no: r.get(2)?, tc_in: r.get(3)?,
-                cam: r.get(4)?, lens: r.get(5)?, rating: r.get(6)?, int_ext: r.get(7)?,
-                day: r.get(8).unwrap_or(1), tags: r.get(9)?, note: r.get(10)?, created_at: r.get(11)?,
-            })
-        } else {
-            Ok(Take {
-                id: r.get(0)?, scene_id: r.get(1)?, take_no: r.get(2)?, tc_in: r.get(3)?,
-                cam: r.get(4)?, lens: r.get(5)?, rating: r.get(6)?, int_ext: String::new(),
-                day: 1,
-                tags: r.get(7)?, note: r.get(8)?, created_at: r.get(9)?,
-            })
-        }
+        Ok(Take {
+            id: r.get(0)?, scene_id: r.get(1)?, take_no: r.get(2)?, tc_in: r.get(3)?,
+            cam: r.get(4)?, lens: r.get(5)?, rating: r.get(6)?, int_ext: r.get(7)?,
+            day: r.get(8).unwrap_or(1), tags: r.get(9)?, note: r.get(10)?, created_at: r.get(11)?,
+        })
     })?;
     rows.collect()
 }

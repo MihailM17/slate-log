@@ -7,7 +7,7 @@ Lightweight, offline-first scene & take tracker for film shoots. Mac + Windows f
 - SQLite storage on your machine — no account, no cloud, works offline on set
 - Excel export: All Takes, Good Selects, per-day stats sheets
 
-Built with [Tauri v2](https://tauri.app/) (Rust backend, vanilla JS frontend). ~7MB installed.
+Built with [Tauri v2](https://tauri.app/) (Rust backend, vanilla JS frontend). 3.7MB .dmg, ~5MB installed.
 
 ## Run in dev
 

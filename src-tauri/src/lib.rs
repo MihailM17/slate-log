@@ -104,7 +104,6 @@ fn get_stats(app: AppHandle, project_id: Option<i64>) -> Result<serde_json::Valu
 fn export_excel(
     app: AppHandle,
     project_id: i64,
-    save_path: Option<String>,
     include_good: Option<bool>,
     include_days: Option<bool>,
 ) -> Result<String, String> {
@@ -116,17 +115,15 @@ fn export_excel(
         let takes = db::fetch_takes(&app, s.id).map_err(|e| e.to_string())?;
         grouped.push((s.clone(), takes));
     }
-    let path = if let Some(p) = save_path {
-        p
-    } else {
-        let docs = app.path().document_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let stem = proj
-            .map(|p| p.film_name.chars().filter(|c| c.is_alphanumeric() || *c == ' ').collect::<String>().replace(' ', "-"))
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "slate-log".into());
-        let fname = format!("{}-{}.xlsx", stem, chrono::Local::now().format("%Y%m%d-%H%M"));
-        docs.join(fname).to_string_lossy().to_string()
-    };
+    // Always the user's Documents folder; filename derived from the film name
+    // (sanitized) so the frontend can never steer writes anywhere else.
+    let docs = app.path().document_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let stem = proj
+        .map(|p| p.film_name.chars().filter(|c| c.is_alphanumeric() || *c == ' ').collect::<String>().replace(' ', "-"))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "slate-log".into());
+    let fname = format!("{}-{}.xlsx", stem, chrono::Local::now().format("%Y%m%d-%H%M"));
+    let path = docs.join(fname).to_string_lossy().to_string();
     export::write_workbook(
         &path,
         &scenes,
@@ -141,7 +138,6 @@ fn export_excel(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             let handle = app.handle().clone();
             db::ensure_schema(&handle);

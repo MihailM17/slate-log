@@ -50,6 +50,9 @@ function confirmAsync(msg, okLabel = "Delete") {
 }
 
 const $ = (id) => document.getElementById(id);
+// Escape all user data before innerHTML — the DB can hold arbitrary strings.
+const esc = (v) =>
+  String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const pad = (n) => String(n).padStart(2, "0");
 const nowTC = () => { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
 const activeProject = () => state.projects.find((p) => p.id === state.activeProjectId);
@@ -105,12 +108,12 @@ function renderHome() {
   $("home-empty").classList.toggle("hidden", state.projects.length > 0);
   rows.forEach((p) => {
     const rate = p.take_count ? Math.round((p.good_count || 0) * 100 / p.take_count) : 0;
-    const crew = [p.director && `Dir. ${p.director}`, p.camera_op && `Cam op. ${p.camera_op}`].filter(Boolean).join(" · ");
-    const loc = [p.location, p.unit].filter(Boolean).join(", ");
+    const crew = [p.director && `Dir. ${esc(p.director)}`, p.camera_op && `Cam op. ${esc(p.camera_op)}`].filter(Boolean).join(" · ");
+    const loc = [p.location, p.unit].filter(Boolean).map(esc).join(", ");
     const d = document.createElement("div");
     d.className = "card-p";
     d.title = "Open project";
-    d.innerHTML = `<h3>${p.film_name || "Untitled film"}</h3>
+    d.innerHTML = `<h3>${esc(p.film_name) || "Untitled film"}</h3>
       ${crew ? `<div class="crew">${crew}</div>` : ""}
       ${loc ? `<div class="crew">${loc}</div>` : ""}
       <div class="stats">Day ${p.shoot_day} · ${p.scene_count} scenes · ${p.take_count} takes · ${rate}% good</div>
@@ -297,7 +300,7 @@ function renderScenes() {
   rows.forEach((s) => {
     const d = document.createElement("div");
     d.className = "scene" + (s.id === state.activeId ? " active" : "");
-    d.innerHTML = `<span class="num">${s.number}</span><div><div class="t">${s.title || "(untitled)"}</div><div class="m"><span class="badge">${s.int_ext}</span><span>${s.daypart} · Day ${s.day ?? 1} · ${s.take_count ?? 0} takes${s.location ? " · " + s.location : ""}</span></div></div>
+    d.innerHTML = `<span class="num">${esc(s.number)}</span><div><div class="t">${esc(s.title) || "(untitled)"}</div><div class="m"><span class="badge">${esc(s.int_ext)}</span><span>${esc(s.daypart)} · Day ${s.day ?? 1} · ${s.take_count ?? 0} takes${s.location ? " · " + esc(s.location) : ""}</span></div></div>
       <div class="row-actions"><button class="mini-btn" data-act="edit" title="Edit scene">✎</button><button class="mini-btn danger" data-act="del" title="Delete scene + its takes">×</button></div>`;
     d.onclick = async (e) => {
       const act = e.target.dataset?.act;
@@ -348,9 +351,9 @@ function renderHead() {
   const s = active();
   if (!s) { $("scene-head").innerHTML = `<p class="empty-hint">Select or create a scene to start logging.</p>`; return; }
   const p = activeProject();
-  $("scene-head").innerHTML = `<h2><span class="n">${s.number}</span>${s.int_ext}. ${(s.title || "").toUpperCase()} — ${s.daypart.toUpperCase()}<button class="scene-edit-btn" id="btn-edit-scene">✎ Edit</button></h2>
-    <div class="meta"><span>Day ${s.day ?? "–"}</span>${s.location ? `<span>${s.location}</span>` : ""}<span>${state.takes.length} takes logged</span><span>Camera ${s.camera_default || "—"}</span></div>
-    <p class="desc">${s.description || ""}</p>`;
+  $("scene-head").innerHTML = `<h2><span class="n">${esc(s.number)}</span>${esc(s.int_ext)}. ${esc(s.title || "").toUpperCase()} — ${esc(s.daypart).toUpperCase()}<button class="scene-edit-btn" id="btn-edit-scene">✎ Edit</button></h2>
+    <div class="meta"><span>Day ${s.day ?? "–"}</span>${s.location ? `<span>${esc(s.location)}</span>` : ""}<span>${state.takes.length} takes logged</span><span>Camera ${esc(s.camera_default) || "—"}</span></div>
+    <p class="desc">${esc(s.description) || ""}</p>`;
   $("take-no").textContent = pad(state.takeNo);
   $("btn-edit-scene").onclick = () => openEditScene(s);
   renderProjectHeader();
@@ -363,8 +366,8 @@ function renderTakes() {
   rows.forEach((t) => {
     const tr = document.createElement("tr");
     const dot = t.rating === "Good" ? "●" : t.rating === "Maybe" ? "◐" : "○";
-    tr.innerHTML = `<td><b>${t.scene_number}</b> <span class="dim">${t.scene_title || ""}</span></td><td>${t.day ?? ""}</td><td>${pad(t.take_no)}</td><td>${t.tc_in}</td><td>${t.cam}</td><td>${t.int_ext}</td><td>${t.lens}</td>
-      <td><span class="pill ${t.rating}">${dot} ${t.rating}</span></td><td>${t.tags || ""}</td><td>${t.note || ""}</td>
+    tr.innerHTML = `<td><b>${esc(t.scene_number)}</b> <span class="dim">${esc(t.scene_title) || ""}</span></td><td>${t.day ?? ""}</td><td>${pad(t.take_no)}</td><td>${esc(t.tc_in)}</td><td>${esc(t.cam)}</td><td>${esc(t.int_ext)}</td><td>${esc(t.lens)}</td>
+      <td><span class="pill ${t.rating}">${dot} ${esc(t.rating)}</span></td><td>${esc(t.tags) || ""}</td><td>${esc(t.note) || ""}</td>
       <td class="rowbtns"><button class="mini-btn" data-act="edit" title="Edit take">✎</button><button class="del" title="Delete take">×</button></td>`;
     tr.querySelector('[data-act="edit"]').onclick = () => openEditTake(t);
     tr.querySelector(".del").onclick = async () => {
@@ -391,6 +394,7 @@ function openEditTake(t) {
 async function saveEditTake() {
   if (!state.editingTakeId) return;
   const editedSceneId = state.allTakes.find((t) => t.id === state.editingTakeId)?.scene_id;
+  if (!validTC($("e-tc").value)) { toast("Timecode must look like HH:MM:SS"); $("e-tc").focus(); return; }
   const payload = {
     tc_in: $("e-tc").value.trim(), cam: $("e-cam").value.trim(),
     lens: $("e-lens").value.trim(), rating: $("e-rating").value,
@@ -440,13 +444,16 @@ function syncLensSeg() {
   });
 }
 const fmtLens = (v) => (/mm\s*$/i.test(v.trim()) ? v.trim() : v.trim() + "mm");
+const validTC = (v) => /^\d{1,2}:\d{2}:\d{2}$/.test(v.trim());
 
 // ---------- actions ----------
 async function logTake() {
   const sc = active(); if (!sc) { toast("Create a scene first"); return; }
+  const tc = S.manualTC ? $("take-tc").value.trim() : nowTC();
+  if (S.manualTC && !validTC(tc)) { toast("Timecode must look like HH:MM:SS"); $("take-tc").focus(); return; }
   const payload = {
     scene_id: sc.id,
-    tc_in: S.manualTC ? ($("take-tc").value.trim() || nowTC()) : nowTC(),
+    tc_in: tc,
     cam: takeCam || sc.camera_default || "A",
     lens: fmtLens(state.lens || "35"), rating: state.rating,
     int_ext: state.takeIntExt || sc.int_ext || "INT",
@@ -568,8 +575,6 @@ const saveLens = () => {
 $("btn-save-lens").onclick = saveLens;
 $("btn-cancel-lens").onclick = () => { $("modal-lens").classList.add("hidden"); syncLensSeg(); };
 $("lens-input").onkeydown = (e) => { if (e.key === "Enter") saveLens(); };
-$("take-minus").onclick = () => { state.takeNo = Math.max(1, state.takeNo - 1); $("take-no").textContent = pad(state.takeNo); };
-$("take-plus").onclick = () => { state.takeNo++; $("take-no").textContent = pad(state.takeNo); };
 $("btn-log").onclick = logTake;
 $("btn-export").onclick = () => exportExcel();
 $("filter").oninput = (e) => { state.filter = e.target.value; renderScenes(); };
@@ -593,7 +598,6 @@ $("btn-create").onclick = async () => {
   sndClick();
   await loadScenes();
 };
-$("btn-first-project").onclick = openNewProject;
 $("btn-cancel-project").onclick = () => $("modal-project").classList.add("hidden");
 $("btn-save-project").onclick = saveProject;
 
