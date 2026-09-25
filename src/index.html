@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slate Log — Scene & take tracker</title>
+<link rel="icon" type="image/png" href="icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="view-home" class="home">
+  <header class="home-head">
+    <div>
+      <div class="brand"><span class="slate">SLATE</span> <span class="log">LOG</span></div>
+      <div class="sub">Pick a project to open</div>
+    </div>
+    <div class="home-actions">
+      <input id="project-search" class="filter home-search" placeholder="Search projects..." autocomplete="off">
+      <button id="btn-home-new" class="btn primary">+ New project</button>
+    </div>
+  </header>
+  <div id="project-grid" class="grid"></div>
+  <div id="home-empty" class="empty hidden">
+    <h2>No projects yet</h2>
+    <p>Create your first project — film name, director and camera op — then add scenes.</p>
+    <button id="btn-home-first" class="btn primary">+ New project</button>
+  </div>
+</div>
+<div id="view-app" class="app hidden">
+  <aside class="sidebar">
+    <button id="btn-home" class="btn ghost home-back" title="Back to all projects">← Projects</button>
+    <div class="brand"><span class="slate">SLATE</span> <span class="log">LOG</span></div>
+    <div class="sub">Scene &amp; take tracker</div>
+    <div class="scenes-head"><span>Scenes</span><span id="scene-count">0</span></div>
+    <input id="filter" class="filter" placeholder="Filter scenes..." autocomplete="off">
+    <div id="scene-list" class="scene-list"></div>
+    <div class="side-foot"><span id="stat-total">0 takes</span><span id="stat-rate">0% good</span></div>
+  </aside>
+
+  <main class="main">
+    <div id="empty-state" class="empty hidden">
+      <h2>No project yet</h2>
+      <p>Create your first project — film name, director and camera op — then add scenes.</p>
+      <button id="btn-first-project" class="btn primary">+ New project</button>
+    </div>
+    <div id="project-view">
+    <header class="topbar">
+      <div>
+        <h1><span id="proj-name">—</span></h1>
+        <p class="proj-sub"><span class="day-stepper"><button id="day-prev" class="mini-btn" title="Previous shoot day">◀</button><b id="day-label">Day 1</b><button id="day-next" class="mini-btn" title="Next shoot day">▶</button></span><span id="proj-sub">—</span></p>
+        <p class="proj-crew" id="proj-crew">—</p>
+      </div>
+      <div class="top-actions">
+        <button id="btn-settings" class="btn ghost" title="App settings">⚙</button>
+        <button id="btn-new-scene" class="btn primary">+ New scene</button>
+      </div>
+    </header>
+
+    <section id="scene-head" class="scene-head"></section>
+
+    <section class="card">
+      <div class="card-head"><strong>Log this take</strong><span class="tc">TC in&nbsp; <b id="tc-now">--:--:--</b><input id="take-tc" class="tc-input hidden" maxlength="8" placeholder="HH:MM:SS" title="Manual timecode — enable in settings"></span></div>
+      <div class="take-row">
+        <button id="take-minus" class="round">−</button>
+        <div class="take-num"><span>TAKE</span><b id="take-no">01</b></div>
+        <button id="take-plus" class="round">+</button>
+        <div class="seg rating" id="seg-rating">
+          <button data-v="Bad" title="Bad = unusable, do not use in edit">Bad</button>
+          <button data-v="Maybe" title="Maybe = backup, keep for review">Maybe</button>
+          <button data-v="Good" class="on" title="Good = best take, use in edit">Good</button>
+        </div>
+      </div>
+      <div class="grid2-take">
+        <label class="fld">Take notes<textarea id="note" rows="2" placeholder="What happened in this take..."></textarea></label>
+        <div><div class="quick-label">INT / EXT (this take)</div><div class="seg" id="seg-take-intext"><button data-v="INT" class="on">INT</button><button data-v="EXT">EXT</button></div></div>
+      </div>
+      <div class="quick-label">Quick notes — tap to add</div>
+      <div id="chips" class="chips"></div>
+      <div class="opt2">
+        <div><div class="quick-label">Camera</div><button id="btn-cam" class="btn ghost" title="Change camera for this take">A</button></div>
+        <div><div class="quick-label">Lens</div><div class="seg" id="seg-lens"><button data-v="24">24</button><button data-v="35">35</button><button data-v="50">50</button><button data-v="85">85</button><button data-v="__custom" id="lens-custom" title="Custom lens">+</button></div></div>
+      </div>
+      <button id="btn-log" class="btn primary big">Log take</button>
+      <div class="keys-hint">Space log · G good · M maybe · B bad · ↑/↓ scene</div>
+    </section>
+
+    <section class="logged-head"><strong>Logged so far</strong><span id="takes-count"></span><span class="logged-spacer"></span><button id="btn-export" class="btn ghost">▦ Export to Excel</button></section>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Scene</th><th>Day</th><th>Take</th><th>TC in</th><th>Cam</th><th>INT/EXT</th><th>Lens</th><th>Rating</th><th>Quick notes</th><th>Description</th><th></th></tr></thead>
+        <tbody id="takes-body"></tbody>
+      </table>
+    </div>
+    <p class="foot-note">○ Bad = no good — ◐ Maybe = hold for review — ● Good = use in edit.</p>
+    </div>
+  </main>
+</div>
+
+<div id="modal" class="modal hidden">
+  <div class="modal-card">
+    <h2 id="modal-title">New scene</h2>
+    <div class="grid2">
+      <label>Number<input id="f-number" placeholder="14"></label>
+      <label>Title<input id="f-title" placeholder="Abandoned lift station"></label>
+      <label>INT/EXT<select id="f-intext"><option>INT</option><option>EXT</option></select></label>
+      <label>Day part<select id="f-daypart"><option>Day</option><option>Dusk</option><option>Night</option><option>Dawn</option></select></label>
+      <label>Shoot day<input id="f-day" type="number" min="1" value="1"></label>
+    </div>
+    <label>Location<input id="f-location" placeholder="Lift station, Vitosha"></label>
+    <label>Camera<input id="f-camera" placeholder="A · Sony FX6"></label>
+    <label>Description<textarea id="f-desc" rows="2"></textarea></label>
+    <div class="modal-actions">
+      <button id="btn-cancel" class="btn ghost">Cancel</button>
+      <button id="btn-create" class="btn primary">Create scene</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-take" class="modal hidden">
+  <div class="modal-card">
+    <h2 id="take-modal-title">Edit take</h2>
+    <div class="grid2">
+      <label>TC in<input id="e-tc" placeholder="HH:MM:SS" maxlength="8"></label>
+      <label>Rating<select id="e-rating"><option>Good</option><option>Maybe</option><option>Bad</option></select></label>
+      <label>Camera<input id="e-cam" autocomplete="off"></label>
+      <label>Lens<input id="e-lens" autocomplete="off"></label>
+      <label>INT/EXT<select id="e-intext"><option>INT</option><option>EXT</option></select></label>
+      <label>Shoot day<input id="e-day" type="number" min="1"></label>
+    </div>
+    <label>Quick notes<input id="e-tags" placeholder="Clean take, ..."></label>
+    <label>Description<textarea id="e-note" rows="2"></textarea></label>
+    <div class="modal-actions">
+      <button id="btn-cancel-take" class="btn ghost">Cancel</button>
+      <button id="btn-save-take" class="btn primary">Save changes</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-project" class="modal hidden">
+  <div class="modal-card">
+    <h2 id="project-modal-title">New project</h2>
+    <label>Film name<input id="p-film" placeholder="Untitled film"></label>
+    <div class="grid2">
+      <label>Director<input id="p-director" placeholder="Director"></label>
+      <label>Camera op<input id="p-cameraop" placeholder="Camera operator"></label>
+      <label>Location<input id="p-location" placeholder="Location"></label>
+      <label>Unit<input id="p-unit" placeholder="Unit"></label>
+    </div>
+    <div class="modal-actions">
+      <button id="btn-cancel-project" class="btn ghost">Cancel</button>
+      <button id="btn-save-project" class="btn primary">Save project</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-cam" class="modal hidden">
+  <div class="modal-card small">
+    <h2>Camera for this take</h2>
+    <label>Camera<input id="cam-input" placeholder="A · Sony FX6" autocomplete="off"></label>
+    <p class="tiny">Rarely changes mid-scene — saved per take.</p>
+    <div class="modal-actions">
+      <button id="btn-cancel-cam" class="btn ghost">Cancel</button>
+      <button id="btn-save-cam" class="btn primary">Set camera</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-settings" class="modal hidden">
+  <div class="modal-card">
+    <h2>App settings</h2>
+    <div class="set-sec">Behaviour</div>
+    <label class="check"><input type="checkbox" id="set-sound"> Play sounds</label>
+    <label class="check"><input type="checkbox" id="set-confirm"> Confirm before deleting</label>
+    <label class="check"><input type="checkbox" id="set-manual-tc"> Enter timecode manually per take</label>
+    <div class="set-sec">Defaults for new takes &amp; scenes</div>
+    <div class="grid2">
+      <label>Default rating<select id="set-def-rating"><option>Good</option><option>Maybe</option><option>Bad</option></select></label>
+      <label>Default lens<input id="set-def-lens" placeholder="35"></label>
+      <label>Default INT/EXT<select id="set-def-intext"><option>INT</option><option>EXT</option></select></label>
+      <label>Default camera<input id="set-def-cam" placeholder="A"></label>
+    </div>
+    <div class="set-sec">Quick notes (one per line)</div>
+    <label><textarea id="set-quick" rows="4"></textarea></label>
+    <div class="set-sec">Excel export</div>
+    <label class="check"><input type="checkbox" id="set-exp-good"> Include Good Selects sheet</label>
+    <label class="check"><input type="checkbox" id="set-exp-days"> Include Days stats sheet</label>
+    <div class="modal-actions">
+      <button id="btn-close-settings" class="btn primary">Done</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-lens" class="modal hidden">
+  <div class="modal-card small">
+    <h2>Custom lens</h2>
+    <label>Lens<input id="lens-input" placeholder="18" autocomplete="off"></label>
+    <p class="tiny">Used for this take. Presets stay untouched.</p>
+    <div class="modal-actions">
+      <button id="btn-cancel-lens" class="btn ghost">Cancel</button>
+      <button id="btn-save-lens" class="btn primary">Set lens</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-confirm" class="modal hidden">
+  <div class="modal-card small">
+    <h2>Are you sure?</h2>
+    <p id="confirm-msg" class="mut"></p>
+    <div class="modal-actions">
+      <button id="btn-confirm-cancel" class="btn ghost">Cancel</button>
+      <button id="btn-confirm-ok" class="btn primary danger">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+<script src="app.js"></script>
+</body>
+</html>

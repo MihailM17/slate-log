@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Tauri / Rust build outputs
+src-tauri/target/
+src-tauri/gen/
+
+# Local databases (your shoot data stays on your machine)
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
