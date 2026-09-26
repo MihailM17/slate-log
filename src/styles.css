@@ -74,6 +74,8 @@ h1{font:600 22px 'Barlow Condensed',sans-serif;letter-spacing:.02em;margin:0}
 .logged-spacer{flex:1}
 .dim{color:var(--dim);font-weight:400}
 .rowbtns{white-space:nowrap}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px}
+.table-wrap{overflow-x:auto}
 .home{min-height:100vh;max-width:1100px;margin:0 auto;padding:28px}
 .home-head{display:flex;justify-content:space-between;align-items:flex-end;gap:14px;margin-bottom:22px;flex-wrap:wrap}
 .home-actions{display:flex;gap:10px;align-items:center}

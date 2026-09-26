@@ -61,6 +61,8 @@ pub struct Take {
     pub rating: String, // "Bad" | "Maybe" | "Good"
     pub int_ext: String,
     pub day: i64,
+    pub cam_file: String,
+    pub audio_file: String,
     pub tags: String,
     pub note: String,
     pub created_at: String,
@@ -79,6 +81,8 @@ pub struct TakeWithScene {
     pub rating: String,
     pub int_ext: String,
     pub day: i64,
+    pub cam_file: String,
+    pub audio_file: String,
     pub tags: String,
     pub note: String,
     pub created_at: String,
@@ -105,6 +109,8 @@ pub struct NewTake {
     pub rating: String,
     pub int_ext: String,
     pub day: i64,
+    pub cam_file: String,
+    pub audio_file: String,
     pub tags: String,
     pub note: String,
 }
@@ -117,6 +123,8 @@ pub struct UpdateTake {
     pub rating: String,
     pub int_ext: String,
     pub day: i64,
+    pub cam_file: String,
+    pub audio_file: String,
     pub tags: String,
     pub note: String,
 }
@@ -173,6 +181,8 @@ fn connect(app: &AppHandle) -> rusqlite::Result<Connection> {
            rating TEXT NOT NULL DEFAULT 'Bad',
            int_ext TEXT NOT NULL DEFAULT '',
            day INTEGER NOT NULL DEFAULT 1,
+           cam_file TEXT NOT NULL DEFAULT '',
+           audio_file TEXT NOT NULL DEFAULT '',
            tags TEXT NOT NULL DEFAULT '',
            note TEXT NOT NULL DEFAULT '',
            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
@@ -189,6 +199,8 @@ fn connect(app: &AppHandle) -> rusqlite::Result<Connection> {
     let _ = conn.execute("ALTER TABLE scenes ADD COLUMN day INTEGER NOT NULL DEFAULT 1", []);
     let _ = conn.execute("ALTER TABLE takes ADD COLUMN day INTEGER NOT NULL DEFAULT 1", []);
     let _ = conn.execute("ALTER TABLE scenes ADD COLUMN location TEXT NOT NULL DEFAULT ''", []);
+    let _ = conn.execute("ALTER TABLE takes ADD COLUMN cam_file TEXT NOT NULL DEFAULT ''", []);
+    let _ = conn.execute("ALTER TABLE takes ADD COLUMN audio_file TEXT NOT NULL DEFAULT ''", []);
     // One "14" per project. May fail on DBs that already contain duplicates
     // from the unconstrained era — the app-level checks below still guard
     // all new writes either way.
@@ -381,8 +393,8 @@ pub fn duplicate_project(app: &AppHandle, id: i64) -> rusqlite::Result<Project> 
         )?;
         let new_sid = conn.last_insert_rowid();
         conn.execute(
-            "INSERT INTO takes (scene_id, take_no, tc_in, cam, lens, rating, int_ext, day, tags, note, created_at)
-             SELECT ?1, take_no, tc_in, cam, lens, rating, int_ext, day, tags, note, created_at FROM takes WHERE scene_id=?2",
+            "INSERT INTO takes (scene_id, take_no, tc_in, cam, lens, rating, int_ext, day, cam_file, audio_file, tags, note, created_at)
+             SELECT ?1, take_no, tc_in, cam, lens, rating, int_ext, day, cam_file, audio_file, tags, note, created_at FROM takes WHERE scene_id=?2",
             params![new_sid, old_sid],
         )?;
     }
@@ -473,13 +485,14 @@ pub fn fetch_takes(app: &AppHandle, scene_id: i64) -> rusqlite::Result<Vec<Take>
     let conn = connect(app)?;
     // connect() always runs the int_ext/day migrations first, so the column exists.
     let mut stmt = conn.prepare(
-        "SELECT id, scene_id, take_no, tc_in, cam, lens, rating, int_ext, day, tags, note, created_at FROM takes WHERE scene_id=?1 ORDER BY take_no",
+        "SELECT id, scene_id, take_no, tc_in, cam, lens, rating, int_ext, day, cam_file, audio_file, tags, note, created_at FROM takes WHERE scene_id=?1 ORDER BY take_no",
     )?;
     let rows = stmt.query_map(params![scene_id], |r| {
         Ok(Take {
             id: r.get(0)?, scene_id: r.get(1)?, take_no: r.get(2)?, tc_in: r.get(3)?,
             cam: r.get(4)?, lens: r.get(5)?, rating: r.get(6)?, int_ext: r.get(7)?,
-            day: r.get(8).unwrap_or(1), tags: r.get(9)?, note: r.get(10)?, created_at: r.get(11)?,
+            day: r.get(8).unwrap_or(1), cam_file: r.get(9).unwrap_or_default(), audio_file: r.get(10).unwrap_or_default(),
+            tags: r.get(11)?, note: r.get(12)?, created_at: r.get(13)?,
         })
     })?;
     rows.collect()
@@ -502,12 +515,12 @@ pub fn insert_take(app: &AppHandle, t: NewTake) -> rusqlite::Result<Take> {
         |r| r.get(0),
     )?;
     conn.execute(
-        "INSERT INTO takes (scene_id, take_no, tc_in, cam, lens, rating, int_ext, day, tags, note) VALUES (?,?,?,?,?,?,?,?,?,?)",
-        params![t.scene_id, no, t.tc_in, t.cam, t.lens, t.rating, t.int_ext, t.day, t.tags, t.note],
+        "INSERT INTO takes (scene_id, take_no, tc_in, cam, lens, rating, int_ext, day, cam_file, audio_file, tags, note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        params![t.scene_id, no, t.tc_in, t.cam, t.lens, t.rating, t.int_ext, t.day, t.cam_file, t.audio_file, t.tags, t.note],
     )?;
     let id = conn.last_insert_rowid();
     let created: String = conn.query_row("SELECT created_at FROM takes WHERE id=?1", params![id], |r| r.get(0))?;
-    Ok(Take { id, scene_id: t.scene_id, take_no: no, tc_in: t.tc_in, cam: t.cam, lens: t.lens, rating: t.rating, int_ext: t.int_ext, day: t.day, tags: t.tags, note: t.note, created_at: created })
+    Ok(Take { id, scene_id: t.scene_id, take_no: no, tc_in: t.tc_in, cam: t.cam, lens: t.lens, rating: t.rating, int_ext: t.int_ext, day: t.day, cam_file: t.cam_file, audio_file: t.audio_file, tags: t.tags, note: t.note, created_at: created })
 }
 
 pub fn remove_take(app: &AppHandle, take_id: i64) -> rusqlite::Result<()> {
@@ -519,8 +532,8 @@ pub fn remove_take(app: &AppHandle, take_id: i64) -> rusqlite::Result<()> {
 pub fn update_take(app: &AppHandle, id: i64, t: UpdateTake) -> rusqlite::Result<()> {
     let conn = connect(app)?;
     conn.execute(
-        "UPDATE takes SET tc_in=?1, cam=?2, lens=?3, rating=?4, int_ext=?5, day=?6, tags=?7, note=?8 WHERE id=?9",
-        params![t.tc_in, t.cam, t.lens, t.rating, t.int_ext, t.day, t.tags, t.note, id],
+        "UPDATE takes SET tc_in=?1, cam=?2, lens=?3, rating=?4, int_ext=?5, day=?6, cam_file=?7, audio_file=?8, tags=?9, note=?10 WHERE id=?11",
+        params![t.tc_in, t.cam, t.lens, t.rating, t.int_ext, t.day, t.cam_file, t.audio_file, t.tags, t.note, id],
     )?;
     Ok(())
 }
@@ -537,7 +550,7 @@ pub fn set_project_day(app: &AppHandle, id: i64, day: i64) -> rusqlite::Result<(
 pub fn fetch_project_takes(app: &AppHandle, project_id: i64) -> rusqlite::Result<Vec<TakeWithScene>> {
     let conn = connect(app)?;
     let mut stmt = conn.prepare(
-        "SELECT t.id, t.scene_id, s.number, s.title, t.take_no, t.tc_in, t.cam, t.lens, t.rating, t.int_ext, t.day, t.tags, t.note, t.created_at
+        "SELECT t.id, t.scene_id, s.number, s.title, t.take_no, t.tc_in, t.cam, t.lens, t.rating, t.int_ext, t.day, t.cam_file, t.audio_file, t.tags, t.note, t.created_at
          FROM takes t JOIN scenes s ON s.id = t.scene_id
          WHERE s.project_id = ?1
          ORDER BY CAST(s.number AS INTEGER), s.number, t.take_no",
@@ -546,8 +559,9 @@ pub fn fetch_project_takes(app: &AppHandle, project_id: i64) -> rusqlite::Result
         Ok(TakeWithScene {
             id: r.get(0)?, scene_id: r.get(1)?, scene_number: r.get(2)?, scene_title: r.get(3)?,
             take_no: r.get(4)?, tc_in: r.get(5)?, cam: r.get(6)?, lens: r.get(7)?,
-            rating: r.get(8)?, int_ext: r.get(9)?, day: r.get(10)?, tags: r.get(11)?, note: r.get(12)?,
-            created_at: r.get(13)?,
+            rating: r.get(8)?, int_ext: r.get(9)?, day: r.get(10)?, cam_file: r.get(11)?, audio_file: r.get(12)?,
+            tags: r.get(13)?, note: r.get(14)?,
+            created_at: r.get(15)?,
         })
     })?;
     rows.collect()

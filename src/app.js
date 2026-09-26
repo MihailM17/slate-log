@@ -277,6 +277,10 @@ async function loadTakes() {
   takeCam = sc.camera_default || S.defaultCam || "A";
   syncTakeSeg(); syncCamBtn(); syncLensSeg();
   if (S.manualTC) $("take-tc").value = nowTC();
+  // filenames continue from the last take of this scene (C0004 -> C0005)
+  const last = [...state.takes].sort((a, b) => a.take_no - b.take_no).pop();
+  $("take-camfile").value = last?.cam_file ? bumpName(last.cam_file) : "";
+  $("take-audiofile").value = last?.audio_file ? bumpName(last.audio_file) : "";
 }
 
 async function refreshStats() {
@@ -366,7 +370,7 @@ function renderTakes() {
   rows.forEach((t) => {
     const tr = document.createElement("tr");
     const dot = t.rating === "Good" ? "●" : t.rating === "Maybe" ? "◐" : "○";
-    tr.innerHTML = `<td><b>${esc(t.scene_number)}</b> <span class="dim">${esc(t.scene_title) || ""}</span></td><td>${t.day ?? ""}</td><td>${pad(t.take_no)}</td><td>${esc(t.tc_in)}</td><td>${esc(t.cam)}</td><td>${esc(t.int_ext)}</td><td>${esc(t.lens)}</td>
+    tr.innerHTML = `<td><b>${esc(t.scene_number)}</b> <span class="dim">${esc(t.scene_title) || ""}</span></td><td>${t.day ?? ""}</td><td>${pad(t.take_no)}</td><td>${esc(t.tc_in)}</td><td>${esc(t.cam)}</td><td>${esc(t.int_ext)}</td><td>${esc(t.lens)}</td><td class="mono">${esc(t.cam_file) || ""}</td><td class="mono">${esc(t.audio_file) || ""}</td>
       <td><span class="pill ${t.rating}">${dot} ${esc(t.rating)}</span></td><td>${esc(t.tags) || ""}</td><td>${esc(t.note) || ""}</td>
       <td class="rowbtns"><button class="mini-btn" data-act="edit" title="Edit take">✎</button><button class="del" title="Delete take">×</button></td>`;
     tr.querySelector('[data-act="edit"]').onclick = () => openEditTake(t);
@@ -387,6 +391,7 @@ function openEditTake(t) {
   $("e-tc").value = t.tc_in; $("e-rating").value = t.rating;
   $("e-cam").value = t.cam; $("e-lens").value = t.lens;
   $("e-intext").value = t.int_ext || "INT"; $("e-day").value = t.day ?? 1;
+  $("e-camfile").value = t.cam_file || ""; $("e-audiofile").value = t.audio_file || "";
   $("e-tags").value = t.tags || ""; $("e-note").value = t.note || "";
   $("modal-take").classList.remove("hidden");
 }
@@ -399,6 +404,7 @@ async function saveEditTake() {
     tc_in: $("e-tc").value.trim(), cam: $("e-cam").value.trim(),
     lens: $("e-lens").value.trim(), rating: $("e-rating").value,
     int_ext: $("e-intext").value, day: parseInt($("e-day").value) || 1,
+    cam_file: $("e-camfile").value.trim(), audio_file: $("e-audiofile").value.trim(),
     tags: $("e-tags").value.trim(), note: $("e-note").value,
   };
   try { await invoke("update_take", { id: state.editingTakeId, take: payload }); }
@@ -445,6 +451,13 @@ function syncLensSeg() {
 }
 const fmtLens = (v) => (/mm\s*$/i.test(v.trim()) ? v.trim() : v.trim() + "mm");
 const validTC = (v) => /^\d{1,2}:\d{2}:\d{2}$/.test(v.trim());
+// Bump trailing run of digits, keeping padding and extension: C0004.MP4 -> C0005.MP4
+const bumpName = (v) => {
+  const m = String(v || "").match(/^(.*?)(\d+)(\.[A-Za-z0-9]+)?$/);
+  if (!m) return v || "";
+  const next = String(parseInt(m[2], 10) + 1).padStart(m[2].length, "0");
+  return m[1] + next + (m[3] || "");
+};
 
 // ---------- actions ----------
 async function logTake() {
@@ -458,6 +471,7 @@ async function logTake() {
     lens: fmtLens(state.lens || "35"), rating: state.rating,
     int_ext: state.takeIntExt || sc.int_ext || "INT",
     day: sc.day ?? 1,
+    cam_file: $("take-camfile").value.trim(), audio_file: $("take-audiofile").value.trim(),
     tags: [...state.tags].join(", "), note: $("note").value || [...state.tags].join(", "),
   };
   try {
@@ -466,6 +480,8 @@ async function logTake() {
   } catch (e) { toast("Log failed: " + e); return; }
   $("take-no").textContent = pad(state.takeNo);
   $("note").value = "";
+  $("take-camfile").value = bumpName(payload.cam_file);
+  $("take-audiofile").value = bumpName(payload.audio_file);
   if (S.manualTC) $("take-tc").value = nowTC();
   sndLog(payload.rating);
   await loadAllTakes(); renderScenes(); renderHead(); refreshStats();

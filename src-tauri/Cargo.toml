@@ -1,6 +1,6 @@
 [package]
 name = "slate-log"
-version = "0.1.1"
+version = "0.1.2"
 description = "Lightweight scene & take tracker for film shoots"
 edition = "2021"
 rust-version = "1.77"

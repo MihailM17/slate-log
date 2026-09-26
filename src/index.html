@@ -74,6 +74,10 @@
         <div><div class="quick-label">Camera</div><button id="btn-cam" class="btn ghost" title="Change camera for this take">A</button></div>
         <div><div class="quick-label">Lens</div><div class="seg" id="seg-lens"><button data-v="24">24</button><button data-v="35">35</button><button data-v="50">50</button><button data-v="85">85</button><button data-v="__custom" id="lens-custom" title="Custom lens">+</button></div></div>
       </div>
+      <div class="grid2">
+        <label class="fld">Camera file<input id="take-camfile" placeholder="A001C004…" autocomplete="off"></label>
+        <label class="fld">Audio file<input id="take-audiofile" placeholder="240901_T01…" autocomplete="off"></label>
+      </div>
       <button id="btn-log" class="btn primary big">Log take</button>
       <div class="keys-hint">Space log · G good · M maybe · B bad · ↑/↓ scene</div>
     </section>
@@ -81,7 +85,7 @@
     <section class="logged-head"><strong>Logged so far</strong><span id="takes-count"></span><span class="logged-spacer"></span><button id="btn-export" class="btn ghost">▦ Export to Excel</button></section>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Scene</th><th>Day</th><th>Take</th><th>TC in</th><th>Cam</th><th>INT/EXT</th><th>Lens</th><th>Rating</th><th>Quick notes</th><th>Description</th><th></th></tr></thead>
+        <thead><tr><th>Scene</th><th>Day</th><th>Take</th><th>TC in</th><th>Cam</th><th>INT/EXT</th><th>Lens</th><th>Camera file</th><th>Audio file</th><th>Rating</th><th>Quick notes</th><th>Description</th><th></th></tr></thead>
         <tbody id="takes-body"></tbody>
       </table>
     </div>
@@ -120,6 +124,8 @@
       <label>Lens<input id="e-lens" autocomplete="off"></label>
       <label>INT/EXT<select id="e-intext"><option>INT</option><option>EXT</option></select></label>
       <label>Shoot day<input id="e-day" type="number" min="1"></label>
+      <label>Camera file<input id="e-camfile" autocomplete="off"></label>
+      <label>Audio file<input id="e-audiofile" autocomplete="off"></label>
     </div>
     <label>Quick notes<input id="e-tags" placeholder="Clean take, ..."></label>
     <label>Description<textarea id="e-note" rows="2"></textarea></label>

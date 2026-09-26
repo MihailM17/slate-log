@@ -20,9 +20,11 @@ fn write_take_row(
     ws.write_string(row, 6, &t.tc_in).map_err(|e| e.to_string())?;
     ws.write_string(row, 7, &t.cam).map_err(|e| e.to_string())?;
     ws.write_string(row, 8, &t.lens).map_err(|e| e.to_string())?;
-    ws.write_string(row, 9, &t.rating).map_err(|e| e.to_string())?;
-    ws.write_string(row, 10, &t.tags).map_err(|e| e.to_string())?;
-    ws.write_string_with_format(row, 11, &t.note, wrap)
+    ws.write_string(row, 9, &t.cam_file).map_err(|e| e.to_string())?;
+    ws.write_string(row, 10, &t.audio_file).map_err(|e| e.to_string())?;
+    ws.write_string(row, 11, &t.rating).map_err(|e| e.to_string())?;
+    ws.write_string(row, 12, &t.tags).map_err(|e| e.to_string())?;
+    ws.write_string_with_format(row, 13, &t.note, wrap)
         .map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -44,7 +46,7 @@ pub fn write_workbook(
     // --- Sheet 1: All takes ---
     let ws = workbook.add_worksheet();
     ws.set_name("All Takes").map_err(|e| e.to_string())?;
-    let headers = ["Scene", "Title", "Location", "Day", "INT/EXT", "Take", "TC In", "Cam", "Lens", "Rating", "Quick notes", "Description"];
+    let headers = ["Scene", "Title", "Location", "Day", "INT/EXT", "Take", "TC In", "Cam", "Lens", "Camera file", "Audio file", "Rating", "Quick notes", "Description"];
     for (c, h) in headers.iter().enumerate() {
         ws.write_string_with_format(0, c as u16, *h, &header)
             .map_err(|e| e.to_string())?;
