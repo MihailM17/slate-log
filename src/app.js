@@ -376,7 +376,13 @@ function openNewScene() {
   const nums = state.scenes.map((s) => parseInt(s.number, 10)).filter((n) => !isNaN(n));
   $("f-number").value = nums.length ? String(Math.max(...nums) + 1) : "1";
   $("f-title").value = ""; $("f-desc").value = "";
-  $("f-camera").value = S.defaultCam || "";
+  // Carry the camera forward from the previous (highest-numbered) scene —
+  // same rig 90% of the time, still editable.
+  const prevCam = state.scenes
+    .map((s) => ({ n: parseInt(s.number, 10), cam: (s.camera_default || "").trim() }))
+    .filter((x) => !isNaN(x.n) && x.cam)
+    .sort((a, b) => b.n - a.n)[0]?.cam || "";
+  $("f-camera").value = prevCam || S.defaultCam || "";
   $("f-location").value = "";
   $("f-intext").value = S.defaultIntExt || "INT";
   $("f-day").value = active()?.day ?? activeProject()?.shoot_day ?? 1;
