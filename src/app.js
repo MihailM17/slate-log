@@ -26,11 +26,12 @@ function saveSettings() {
 }
 const state = {
   projects: [], activeProjectId: null,
-  scenes: [], takes: [], allTakes: [], setups: [], activeId: null,
+  scenes: [], takes: [], allTakes: [], setups: [], photos: [], activeId: null,
   rating: S.defaultRating, lens: S.defaultLens, takeIntExt: S.defaultIntExt, tags: new Set(),
-  takeNo: 1, takeSetupId: null, filter: "", projectQuery: "", editingSceneId: null, editingProjectId: null, editingTakeId: null,
+  takeNo: 1, takeSetupId: null, lastDuration: 0, filter: "", projectQuery: "", editingSceneId: null, editingProjectId: null, editingTakeId: null, lightboxId: null,
 };
 let takeCam = "A";
+let timing = null, tickH = null;
 
 // In-app confirm (reliable inside the Tauri webview, unlike native dialogs).
 function confirmAsync(msg, okLabel = "Delete") {
@@ -138,14 +139,15 @@ function renderHome() {
 }
 
 function showView(name) {
-  $("view-home").classList.toggle("hidden", name !== "home");
-  $("view-app").classList.toggle("hidden", name !== "app");
-  $("view-report").classList.toggle("hidden", name !== "report");
+  for (const v of ["home", "app", "report", "progress"]) {
+    $(`view-${v}`).classList.toggle("hidden", name !== v);
+  }
 }
 
 async function openProject(id) {
   state.activeProjectId = id; state.activeId = null;
-  state.scenes = []; state.takes = []; state.allTakes = []; state.setups = [];
+  state.scenes = []; state.takes = []; state.allTakes = []; state.setups = []; state.photos = [];
+  resetTimerUI();
   showView("app");
   await loadScenes();
 }
@@ -164,7 +166,7 @@ function openReport() {
   showView("report");
 }
 
-function renderReport() {
+async function renderReport() {
   const p = activeProject(); if (!p) return;
   const day = parseInt($("report-day").value) || 1;
   const takes = state.allTakes.filter((t) => (t.day ?? 1) === day);
@@ -191,7 +193,27 @@ function renderReport() {
     <h2>All takes</h2>
     ${takes.length ? `<table><thead><tr><th>Scene</th><th>Take</th><th>TC</th><th>Cam</th><th>Lens</th><th>Camera file</th><th>Audio file</th><th>Rating</th><th>Notes</th><th>Description</th></tr></thead><tbody>${takes.map(row).join("")}</tbody></table>` : "<p>Nothing logged for this day yet.</p>"}
     <h2>Scenes</h2>
-    ${scenes.length ? `<table><thead><tr><th>Scene</th><th>Title</th><th>Status</th><th>Takes</th></tr></thead><tbody>${scenes.map((s) => `<tr><td><b>${esc(s.number)}</b></td><td>${esc(s.title)}</td><td>${esc(s.status || "Not shot")}</td><td>${s.take_count ?? 0}</td></tr>`).join("")}</tbody></table>` : "<p>No scenes scheduled for this day.</p>"}`;
+    ${scenes.length ? `<table><thead><tr><th>Scene</th><th>Title</th><th>Status</th><th>Takes</th></tr></thead><tbody>${scenes.map((s) => `<tr><td><b>${esc(s.number)}</b></td><td>${esc(s.title)}</td><td>${esc(s.status || "Not shot")}</td><td>${s.take_count ?? 0}</td></tr>`).join("")}</tbody></table>` : "<p>No scenes scheduled for this day.</p>"}
+    <h2>Continuity stills</h2>
+    <div id="report-stills"><p>Loading stills…</p></div>`;
+  // Contact sheet loads after the text (photo reads are one invoke each).
+  try {
+    let sheet = "";
+    for (const s of scenes) {
+      let photos = [];
+      try { photos = await invoke("list_photos", { sceneId: s.id }); } catch { continue; }
+      if (!photos.length) continue;
+      const thumbs = [];
+      for (const ph of photos) {
+        try { thumbs.push({ ph, src: await invoke("photo_data", { id: ph.id, thumb: true }) }); }
+        catch { /* skip unreadable */ }
+      }
+      if (!thumbs.length) continue;
+      sheet += `<h3>Scene ${esc(s.number)}${s.title ? " · " + esc(s.title) : ""}</h3><div class="thumbs">${thumbs.map(({ ph, src }) => `<figure><img src="${src}" alt="Continuity still"><figcaption>${esc(ph.caption) || esc(ph.setup_name) || ""}</figcaption></figure>`).join("")}</div>`;
+    }
+    const el = $("report-stills");
+    if (el) el.innerHTML = sheet || "<p>No stills for this day yet.</p>";
+  } catch { /* report stands without stills */ }
 }
 
 function renderProjectHeader() {
@@ -233,6 +255,7 @@ function openNewProject() {
   state.editingProjectId = null;
   $("project-modal-title").textContent = "New project";
   ["p-film","p-director","p-cameraop","p-location","p-unit"].forEach((id) => $(id).value = "");
+  $("p-fps").value = "25";
   $("modal-project").classList.remove("hidden");
 }
 
@@ -243,6 +266,7 @@ function openEditProject(p) {
   $("project-modal-title").textContent = "Edit project";
   $("p-film").value = p.film_name; $("p-director").value = p.director; $("p-cameraop").value = p.camera_op;
   $("p-location").value = p.location; $("p-unit").value = p.unit;
+  $("p-fps").value = String(p.fps ?? 25);
   $("modal-project").classList.remove("hidden");
 }
 
@@ -252,6 +276,7 @@ async function saveProject() {
     film_name: $("p-film").value.trim() || "Untitled film",
     director: $("p-director").value.trim(), camera_op: $("p-cameraop").value.trim(),
     location: $("p-location").value.trim(), unit: $("p-unit").value.trim(),
+    fps: parseFloat($("p-fps").value) || 25,
     // days are driven by the ◀ Day ▶ stepper, cameras per take — not asked here
     shoot_day: state.editingProjectId ? (cur?.shoot_day ?? 1) : 1,
     total_days: state.editingProjectId ? (cur?.total_days ?? 1) : 1,
@@ -310,6 +335,8 @@ async function loadAllTakes() {
 
 async function loadTakes() {
   const sc = active(); if (!sc) { state.takes = []; return; }
+  resetTimerUI();
+  state.lastDuration = 0;
   try {
     state.takes = await invoke("list_takes", { sceneId: sc.id });
     state.takeNo = await invoke("next_take", { sceneId: sc.id });
@@ -321,6 +348,7 @@ async function loadTakes() {
   takeCam = sc.camera_default || S.defaultCam || "A";
   syncTakeSeg(); syncCamBtn(); syncLensSeg(); renderSetupChips();
   if (S.manualTC) $("take-tc").value = nowTC();
+  await loadPhotos();
   // filenames continue from the last take of this scene (C0004 -> C0005)
   const last = [...state.takes].sort((a, b) => a.take_no - b.take_no).pop();
   $("take-camfile").value = last?.cam_file ? bumpName(last.cam_file) : "";
@@ -437,7 +465,7 @@ function renderTakes() {
   rows.forEach((t) => {
     const tr = document.createElement("tr");
     const dot = t.rating === "Good" ? "●" : t.rating === "Maybe" ? "◐" : "○";
-    tr.innerHTML = `<td><b>${esc(t.scene_number)}</b> <span class="dim">${esc(t.scene_title) || ""}</span></td><td>${esc(t.setup_name) || ""}</td><td>${t.day ?? ""}</td><td>${pad(t.take_no)}</td><td>${esc(t.tc_in)}</td><td>${esc(t.cam)}</td><td>${esc(t.int_ext)}</td><td>${esc(t.lens)}</td><td class="mono">${esc(t.cam_file) || ""}</td><td class="mono">${esc(t.audio_file) || ""}</td>
+    tr.innerHTML = `<td><b>${esc(t.scene_number)}</b> <span class="dim">${esc(t.scene_title) || ""}</span></td><td>${esc(t.setup_name) || ""}</td><td>${t.day ?? ""}</td><td>${pad(t.take_no)}</td><td>${esc(t.tc_in)}${t.duration_sec > 0 ? `<br><span class="dim">${Math.round(t.duration_sec * 10) / 10}s</span>` : ""}</td><td>${esc(t.cam)}</td><td>${esc(t.int_ext)}</td><td>${esc(t.lens)}</td><td class="mono">${esc(t.cam_file) || ""}</td><td class="mono">${esc(t.audio_file) || ""}</td>
       <td><span class="pill ${t.rating}">${dot} ${esc(t.rating)}</span></td><td>${esc(t.tags) || ""}</td><td>${esc(t.note) || ""}</td>
       <td class="rowbtns"><button class="mini-btn" data-act="edit" title="Edit take">✎</button><button class="del" title="Delete take">×</button></td>`;
     tr.querySelector('[data-act="edit"]').onclick = () => openEditTake(t);
@@ -459,6 +487,7 @@ function openEditTake(t) {
   $("e-cam").value = t.cam; $("e-lens").value = t.lens;
   $("e-intext").value = t.int_ext || "INT"; $("e-day").value = t.day ?? 1;
   $("e-camfile").value = t.cam_file || ""; $("e-audiofile").value = t.audio_file || "";
+  $("e-dur").value = t.duration_sec ? String(Math.round(t.duration_sec * 10) / 10) : "";
   $("e-tags").value = t.tags || ""; $("e-note").value = t.note || "";
   const sel = $("e-setup"); sel.innerHTML = "";
   const none = document.createElement("option");
@@ -500,6 +529,7 @@ async function saveEditTake() {
     tc_in: $("e-tc").value.trim(), cam: $("e-cam").value.trim(),
     lens: $("e-lens").value.trim(), rating: $("e-rating").value,
     int_ext: $("e-intext").value, day: parseInt($("e-day").value) || 1,
+    duration_sec: Math.max(0, parseFloat($("e-dur").value) || 0),
     setup_id: $("e-setup").value === "" ? null : parseInt($("e-setup").value),
     cam_file: $("e-camfile").value.trim(), audio_file: $("e-audiofile").value.trim(),
     tags: $("e-tags").value.trim(), note: $("e-note").value,
@@ -558,6 +588,133 @@ async function saveSetup() {
   await loadTakes(); renderSetupChips();
 }
 
+// ---------- continuity stills ----------
+async function loadPhotos() {
+  const sc = active();
+  if (!sc) { state.photos = []; renderPhotos(); return; }
+  try { state.photos = await invoke("list_photos", { sceneId: sc.id }); }
+  catch { state.photos = []; }
+  renderPhotos();
+}
+
+function renderPhotos() {
+  const w = $("photos");
+  const sc = active();
+  if (!sc) { w.innerHTML = ""; return; }
+  w.innerHTML = `<div class="photos-head"><strong>Continuity stills</strong><span>${state.photos.length}</span><button id="btn-add-photo" class="mini-btn" title="Import a still into this scene">+ Add photo</button></div><div class="photo-grid" id="photo-grid"></div>`;
+  $("btn-add-photo").onclick = addPhoto;
+  const g = $("photo-grid");
+  state.photos.forEach((p) => {
+    const cell = document.createElement("div");
+    cell.className = "photo-cell";
+    cell.title = "Open still";
+    cell.innerHTML = `<img alt="Continuity still"><div class="cap">${esc(p.caption) || esc(p.setup_name) || "—"}</div>`;
+    cell.querySelector("img").onclick = () => openLightbox(p.id);
+    invoke("photo_data", { id: p.id, thumb: true })
+      .then((src) => { const im = cell.querySelector("img"); if (im) im.src = src; })
+      .catch(() => {});
+    g.appendChild(cell);
+  });
+}
+
+async function addPhoto() {
+  const sc = active(); if (!sc) return;
+  try {
+    await invoke("add_photo", { sceneId: sc.id, setupId: state.takeSetupId });
+    sndClick(); toast("Photo added");
+    await loadPhotos();
+  } catch (e) {
+    if (!String(e).includes("cancelled")) toast("Photo failed: " + e);
+  }
+}
+
+async function openLightbox(id) {
+  state.lightboxId = id;
+  const p = state.photos.find((x) => x.id === id);
+  $("lightbox-cap").value = p?.caption || "";
+  $("lightbox-img").removeAttribute("src");
+  $("modal-lightbox").classList.remove("hidden");
+  try { $("lightbox-img").src = await invoke("photo_data", { id, thumb: false }); }
+  catch (e) { toast("Could not load photo: " + e); }
+}
+
+// ---------- stopwatch ----------
+const fmtDur = (s) => `${pad(Math.floor(s / 60))}:${pad(Math.floor(s % 60))}`;
+
+function resetTimerUI() {
+  timing = null;
+  clearInterval(tickH);
+  const b = $("btn-timer"), t = $("take-timer"), l = $("btn-log");
+  if (b) b.textContent = "⏱ Start timer";
+  if (t) t.textContent = "00:00";
+  if (l) l.textContent = "Log take";
+}
+
+function toggleTimer() {
+  if (timing) {
+    const s = (performance.now() - timing) / 1000;
+    resetTimerUI();
+    $("take-timer").textContent = fmtDur(s);
+    toast(`Timed ${s.toFixed(1)}s — will attach to the next logged take`);
+    state.lastDuration = s;
+    return;
+  }
+  timing = performance.now();
+  state.lastDuration = 0;
+  $("btn-timer").textContent = "◼ Stop";
+  $("btn-log").textContent = "◼ Cut & Log";
+  tickH = setInterval(() => { $("take-timer").textContent = fmtDur((performance.now() - timing) / 1000); }, 250);
+  sndClick();
+}
+
+// ---------- wrap progress board ----------
+function openProgress() {
+  if (!state.activeProjectId) { toast("Open a project first"); return; }
+  renderProgress();
+  showView("progress");
+}
+
+function renderProgress() {
+  const p = activeProject(); if (!p) return;
+  $("progress-sub").textContent = `${p.film_name || "Untitled film"} — wrap progress`;
+  const days = [...new Set(state.scenes.map((s) => s.day ?? 1))].sort((a, b) => a - b);
+  const done = state.scenes.filter((s) => s.status === "Complete").length;
+  const pct = state.scenes.length ? Math.round((done * 100) / state.scenes.length) : 0;
+  const good = state.allTakes.filter((t) => t.rating === "Good").length;
+  let html = `<div class="meta"><span>${done}/${state.scenes.length} scenes complete</span><span>${state.allTakes.length} takes · ${good} good</span></div><div class="prog-bar"><i style="width:${pct}%"></i></div>`;
+  days.forEach((d) => {
+    html += `<div class="prog-day">Day ${d}</div>`;
+    state.scenes
+      .filter((s) => (s.day ?? 1) === d)
+      .forEach((s) => {
+        const takes = state.allTakes.filter((t) => t.scene_id === s.id);
+        const g = takes.filter((t) => t.rating === "Good").length;
+        const st = s.status || "Not shot";
+        html += `<div class="prog-row" data-id="${s.id}"><span class="num">${esc(s.number)}</span><span class="tt">${esc(s.title) || "(untitled)"}</span><span class="meta">${takes.length} takes · ${g} good</span><button class="status-btn ${st.replace(" ", "")}" data-st="${s.id}" title="Tap to cycle status">${esc(st)}</button></div>`;
+      });
+  });
+  if (!state.scenes.length) html += `<p class="empty-hint">No scenes yet.</p>`;
+  $("progress-body").innerHTML = html;
+  document.querySelectorAll(".prog-row").forEach((r) => {
+    r.onclick = async (e) => {
+      const id = parseInt(r.dataset.id);
+      const s = state.scenes.find((x) => x.id === id);
+      if (!s) return;
+      if (e.target.dataset.st) {
+        e.stopPropagation();
+        await cycleStatus(s);
+        renderProgress();
+        return;
+      }
+      resetTimerUI();
+      state.activeId = id;
+      await loadTakes();
+      renderScenes(); renderHead();
+      showView("app");
+    };
+  });
+}
+
 function renderChips() {  const c = $("chips"); c.innerHTML = "";
   S.quickNotes.forEach((q) => {
     const b = document.createElement("button");
@@ -606,6 +763,7 @@ async function logTake() {
   const sc = active(); if (!sc) { toast("Create a scene first"); return; }
   const tc = S.manualTC ? $("take-tc").value.trim() : nowTC();
   if (S.manualTC && !validTC(tc)) { toast("Timecode must look like HH:MM:SS"); $("take-tc").focus(); return; }
+  const dur = timing ? (performance.now() - timing) / 1000 : (state.lastDuration || 0);
   const payload = {
     scene_id: sc.id,
     tc_in: tc,
@@ -613,6 +771,7 @@ async function logTake() {
     lens: fmtLens(state.lens || "35"), rating: state.rating,
     int_ext: state.takeIntExt || sc.int_ext || "INT",
     day: sc.day ?? 1,
+    duration_sec: Math.round(dur * 10) / 10,
     setup_id: state.takeSetupId,
     cam_file: $("take-camfile").value.trim(), audio_file: $("take-audiofile").value.trim(),
     tags: [...state.tags].join(", "), note: $("note").value || [...state.tags].join(", "),
@@ -626,6 +785,8 @@ async function logTake() {
   $("take-camfile").value = bumpName(payload.cam_file);
   $("take-audiofile").value = bumpName(payload.audio_file);
   if (S.manualTC) $("take-tc").value = nowTC();
+  resetTimerUI();
+  state.lastDuration = 0;
   sndLog(payload.rating);
   await loadAllTakes(); renderScenes(); renderHead(); refreshStats();
   toast(`Take ${pad(state.takeNo - 1)} · ${payload.rating} logged`);
@@ -765,6 +926,44 @@ $("btn-save-lens").onclick = saveLens;
 $("btn-cancel-lens").onclick = () => { $("modal-lens").classList.add("hidden"); syncLensSeg(); };
 $("lens-input").onkeydown = (e) => { if (e.key === "Enter") saveLens(); };
 $("btn-log").onclick = logTake;
+$("btn-timer").onclick = toggleTimer;
+$("btn-progress").onclick = openProgress;
+$("btn-progress-back").onclick = () => showView("app");
+$("btn-edl").onclick = async () => {
+  if (!state.activeProjectId) return;
+  try {
+    const r = await invoke("export_edl", { projectId: state.activeProjectId });
+    sndExport();
+    toast(`EDL: ${r.events} events${r.skipped ? ` (${r.skipped} bad TC skipped)` : ""} → ${r.path}`);
+  } catch (e) { toast("EDL failed: " + e); }
+};
+$("btn-pdf").onclick = async () => {
+  if (!state.activeProjectId) return;
+  const day = parseInt($("report-day").value) || 1;
+  try {
+    const path = await invoke("export_pdf", { projectId: state.activeProjectId, day });
+    sndExport();
+    toast(`PDF saved → ${path}`);
+  } catch (e) { toast("PDF failed: " + e); }
+};
+$("btn-lightbox-close").onclick = () => $("modal-lightbox").classList.add("hidden");
+$("btn-lightbox-save").onclick = async () => {
+  if (!state.lightboxId) return;
+  try { await invoke("update_photo_caption", { id: state.lightboxId, caption: $("lightbox-cap").value.trim() }); }
+  catch (e) { toast("Save failed: " + e); return; }
+  sndClick();
+  $("modal-lightbox").classList.add("hidden");
+  await loadPhotos();
+};
+$("btn-lightbox-del").onclick = async () => {
+  if (!state.lightboxId) return;
+  if (!(await confirmAsync("Delete this still?"))) return;
+  try { await invoke("delete_photo", { id: state.lightboxId }); } catch (e) { toast("Delete failed: " + e); return; }
+  sndDelete();
+  state.lightboxId = null;
+  $("modal-lightbox").classList.add("hidden");
+  await loadPhotos();
+};
 $("btn-export").onclick = () => exportExcel();
 $("filter").oninput = (e) => { state.filter = e.target.value; renderScenes(); };
 $("btn-home").onclick = goHome;

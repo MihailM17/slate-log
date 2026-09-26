@@ -1,6 +1,6 @@
 [package]
 name = "slate-log"
-version = "0.2.1"
+version = "0.3.0"
 description = "Lightweight scene & take tracker for film shoots"
 edition = "2021"
 rust-version = "1.77"
@@ -20,6 +20,9 @@ serde_json = { version = "1" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 rust_xlsxwriter = "0.90"
 csv = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp", "tiff", "gif"] }
+base64 = "0.22"
+printpdf = "0.7"
 chrono = { version = "0.4", features = ["serde", "clock"] }
 
 [features]
