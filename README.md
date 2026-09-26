@@ -12,6 +12,20 @@ Lightweight, offline-first scene & take tracker for film shoots. Mac + Windows f
 
 Built with [Tauri v2](https://tauri.app/) (Rust backend, vanilla JS frontend). 3.7MB .dmg, ~5MB installed.
 
+## Screenshots
+
+| Project picker | Logging takes |
+|---|---|
+| ![Project home](docs/screenshots/03-home.png) | ![Log view](docs/screenshots/02-logging.png) |
+
+| Takes table | Settings |
+|---|---|
+| ![Logged takes](docs/screenshots/05-table.png) | ![App settings](docs/screenshots/04-settings.png) |
+
+| Daily report | Excel export |
+|---|---|
+| ![Daily report](docs/screenshots/01-report.png) | ![Excel sheets](docs/screenshots/06-excel.png) |
+
 ## Run in dev
 
 ```zsh
