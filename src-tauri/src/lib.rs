@@ -108,6 +108,107 @@ fn delete_setup(app: AppHandle, id: i64) -> Result<(), String> {
     db::remove_setup(&app, id).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn list_photos(app: AppHandle, scene_id: i64) -> Result<Vec<db::Photo>, String> {
+    db::fetch_photos(&app, scene_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn add_photo(app: AppHandle, scene_id: i64, setup_id: Option<i64>) -> Result<db::Photo, String> {
+    use tauri_plugin_dialog::FilePath;
+    let app2 = app.clone();
+    let picked: Option<FilePath> = tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let (tx, rx) = std::sync::mpsc::channel::<Option<FilePath>>();
+        app2.dialog()
+            .file()
+            .add_filter("Images", &["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff", "gif"])
+            .pick_file(move |p| {
+                let _ = tx.send(p);
+            });
+        rx.recv().unwrap_or(None)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let path = match picked {
+        Some(FilePath::Path(p)) => p,
+        Some(_) => return Err("Only local files can be imported".into()),
+        None => return Err("cancelled".into()),
+    };
+    db::import_photo(&app, scene_id, setup_id, path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn photo_data(app: AppHandle, id: i64, thumb: bool) -> Result<String, String> {
+    db::photo_data_url(&app, id, thumb).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_photo_caption(app: AppHandle, id: i64, caption: String) -> Result<(), String> {
+    db::update_photo_caption(&app, id, caption).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_photo(app: AppHandle, id: i64) -> Result<(), String> {
+    db::remove_photo(&app, id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn export_pdf(app: AppHandle, project_id: i64, day: i64) -> Result<String, String> {
+    let projects = db::fetch_projects(&app).map_err(|e| e.to_string())?;
+    let proj = projects
+        .iter()
+        .find(|p| p.id == project_id)
+        .cloned()
+        .ok_or("project not found")?;
+    let scenes: Vec<Scene> = db::fetch_scenes(&app, project_id)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|s| s.day == day)
+        .collect();
+    let all = db::fetch_project_takes(&app, project_id).map_err(|e| e.to_string())?;
+    let takes: Vec<TakeWithScene> = all.into_iter().filter(|t| t.day == day).collect();
+    let docs = app
+        .path()
+        .document_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let stem: String = proj
+        .film_name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == ' ')
+        .collect::<String>()
+        .replace(' ', "-");
+    let stem = if stem.is_empty() { "slate-log".to_string() } else { stem };
+    let path = docs.join(format!("{stem}-day{day}-log.pdf"));
+    export::write_pdf(&path.to_string_lossy(), &proj.film_name, &proj.director, &proj.location, day, &scenes, &takes)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn export_edl(app: AppHandle, project_id: i64) -> Result<serde_json::Value, String> {
+    let projects = db::fetch_projects(&app).map_err(|e| e.to_string())?;
+    let proj = projects
+        .iter()
+        .find(|p| p.id == project_id)
+        .cloned()
+        .ok_or("project not found")?;
+    let all = db::fetch_project_takes(&app, project_id).map_err(|e| e.to_string())?;
+    let docs = app
+        .path()
+        .document_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let stem: String = proj
+        .film_name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == ' ')
+        .collect::<String>()
+        .replace(' ', "-");
+    let stem = if stem.is_empty() { "slate-log".to_string() } else { stem };
+    let path = docs.join(format!("{stem}-selects.edl"));
+    let (events, skipped) = export::write_edl(&path.to_string_lossy(), &stem, proj.fps, &all)?;
+    Ok(serde_json::json!({ "path": path.to_string_lossy(), "events": events, "skipped": skipped }))
+}
+
 fn col_index(header: &[String], names: &[&str]) -> Option<usize> {
     header
         .iter()
@@ -309,6 +410,13 @@ pub fn run() {
             list_setups,
             create_setup,
             delete_setup,
+            list_photos,
+            add_photo,
+            photo_data,
+            update_photo_caption,
+            delete_photo,
+            export_pdf,
+            export_edl,
             import_scenes_csv,
             write_template_csv,
             list_takes,

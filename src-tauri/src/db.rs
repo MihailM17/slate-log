@@ -15,6 +15,7 @@ pub struct Project {
     pub unit: String,
     pub shoot_day: i64,
     pub total_days: i64,
+    pub fps: f64,
     pub camera_a: String,
     pub camera_b: String,
     pub scene_count: i64,
@@ -31,6 +32,7 @@ pub struct NewProject {
     pub unit: String,
     pub shoot_day: i64,
     pub total_days: i64,
+    pub fps: f64,
     pub camera_a: String,
     pub camera_b: String,
 }
@@ -62,6 +64,7 @@ pub struct Take {
     pub rating: String, // "Bad" | "Maybe" | "Good"
     pub int_ext: String,
     pub day: i64,
+    pub duration_sec: f64,
     pub cam_file: String,
     pub audio_file: String,
     pub setup_id: Option<i64>,
@@ -83,6 +86,7 @@ pub struct TakeWithScene {
     pub rating: String,
     pub int_ext: String,
     pub day: i64,
+    pub duration_sec: f64,
     pub cam_file: String,
     pub audio_file: String,
     pub setup_id: Option<i64>,
@@ -98,6 +102,17 @@ pub struct Setup {
     pub scene_id: i64,
     pub name: String,
     pub take_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Photo {
+    pub id: i64,
+    pub scene_id: i64,
+    pub setup_id: Option<i64>,
+    pub setup_name: String,
+    pub filename: String,
+    pub caption: String,
+    pub created_at: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -122,6 +137,7 @@ pub struct NewTake {
     pub rating: String,
     pub int_ext: String,
     pub day: i64,
+    pub duration_sec: f64,
     pub cam_file: String,
     pub audio_file: String,
     pub setup_id: Option<i64>,
@@ -137,6 +153,7 @@ pub struct UpdateTake {
     pub rating: String,
     pub int_ext: String,
     pub day: i64,
+    pub duration_sec: f64,
     pub cam_file: String,
     pub audio_file: String,
     pub setup_id: Option<i64>,
@@ -170,6 +187,7 @@ fn connect(app: &AppHandle) -> rusqlite::Result<Connection> {
            unit TEXT NOT NULL DEFAULT '',
            shoot_day INTEGER NOT NULL DEFAULT 1,
            total_days INTEGER NOT NULL DEFAULT 1,
+           fps REAL NOT NULL DEFAULT 25,
            camera_a TEXT NOT NULL DEFAULT '',
            camera_b TEXT NOT NULL DEFAULT '',
            created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
@@ -196,6 +214,7 @@ fn connect(app: &AppHandle) -> rusqlite::Result<Connection> {
            rating TEXT NOT NULL DEFAULT 'Bad',
            int_ext TEXT NOT NULL DEFAULT '',
            day INTEGER NOT NULL DEFAULT 1,
+           duration_sec REAL NOT NULL DEFAULT 0,
            cam_file TEXT NOT NULL DEFAULT '',
            audio_file TEXT NOT NULL DEFAULT '',
            tags TEXT NOT NULL DEFAULT '',
@@ -212,6 +231,14 @@ fn connect(app: &AppHandle) -> rusqlite::Result<Connection> {
            scene_id INTEGER NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
            name TEXT NOT NULL DEFAULT '',
            UNIQUE(scene_id, name)
+         );
+         CREATE TABLE IF NOT EXISTS photos (
+           id INTEGER PRIMARY KEY AUTOINCREMENT,
+           scene_id INTEGER NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+           setup_id INTEGER,
+           filename TEXT NOT NULL DEFAULT '',
+           caption TEXT NOT NULL DEFAULT '',
+           created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
          );",
     )?;
     // Idempotent migrations for DBs created by older versions
@@ -224,6 +251,8 @@ fn connect(app: &AppHandle) -> rusqlite::Result<Connection> {
     let _ = conn.execute("ALTER TABLE takes ADD COLUMN audio_file TEXT NOT NULL DEFAULT ''", []);
     let _ = conn.execute("ALTER TABLE scenes ADD COLUMN status TEXT NOT NULL DEFAULT 'Not shot'", []);
     let _ = conn.execute("ALTER TABLE takes ADD COLUMN setup_id INTEGER", []);
+    let _ = conn.execute("ALTER TABLE takes ADD COLUMN duration_sec REAL NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE projects ADD COLUMN fps REAL NOT NULL DEFAULT 25", []);
     // One "14" per project. May fail on DBs that already contain duplicates
     // from the unconstrained era — the app-level checks below still guard
     // all new writes either way.
@@ -327,7 +356,7 @@ pub fn backup_db(app: &AppHandle) {
 pub fn fetch_projects(app: &AppHandle) -> rusqlite::Result<Vec<Project>> {
     let conn = connect(app)?;
     let mut stmt = conn.prepare(
-        "SELECT p.id, p.film_name, p.director, p.camera_op, p.location, p.unit, p.shoot_day, p.total_days, p.camera_a, p.camera_b,
+        "SELECT p.id, p.film_name, p.director, p.camera_op, p.location, p.unit, p.shoot_day, p.total_days, p.fps, p.camera_a, p.camera_b,
                 (SELECT COUNT(*) FROM scenes s WHERE s.project_id=p.id) AS sc,
                 (SELECT COUNT(*) FROM takes t JOIN scenes s ON s.id=t.scene_id WHERE s.project_id=p.id) AS tc,
                 (SELECT COUNT(*) FROM takes t JOIN scenes s ON s.id=t.scene_id WHERE s.project_id=p.id AND t.rating='Good') AS gc
@@ -343,37 +372,61 @@ pub fn fetch_projects(app: &AppHandle) -> rusqlite::Result<Vec<Project>> {
             unit: r.get(5)?,
             shoot_day: r.get(6)?,
             total_days: r.get(7)?,
-            camera_a: r.get(8)?,
-            camera_b: r.get(9)?,
-            scene_count: r.get(10)?,
-            take_count: r.get(11)?,
-            good_count: r.get(12)?,
+            fps: r.get(8).unwrap_or(25.0),
+            camera_a: r.get(9)?,
+            camera_b: r.get(10)?,
+            scene_count: r.get(11)?,
+            take_count: r.get(12)?,
+            good_count: r.get(13)?,
         })
     })?;
     rows.collect()
 }
 
+fn valid_fps(f: f64) -> f64 {
+    if f > 0.0 && f < 1000.0 {
+        f
+    } else {
+        25.0
+    }
+}
+
 pub fn insert_project(app: &AppHandle, p: NewProject) -> rusqlite::Result<Project> {
     let conn = connect(app)?;
+    let fps = valid_fps(p.fps);
     conn.execute(
-        "INSERT INTO projects (film_name, director, camera_op, location, unit, shoot_day, total_days, camera_a, camera_b) VALUES (?,?,?,?,?,?,?,?,?)",
-        params![p.film_name, p.director, p.camera_op, p.location, p.unit, p.shoot_day, p.total_days, p.camera_a, p.camera_b],
+        "INSERT INTO projects (film_name, director, camera_op, location, unit, shoot_day, total_days, fps, camera_a, camera_b) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        params![p.film_name, p.director, p.camera_op, p.location, p.unit, p.shoot_day, p.total_days, fps, p.camera_a, p.camera_b],
     )?;
     let id = conn.last_insert_rowid();
-    Ok(Project { id, film_name: p.film_name, director: p.director, camera_op: p.camera_op, location: p.location, unit: p.unit, shoot_day: p.shoot_day, total_days: p.total_days, camera_a: p.camera_a, camera_b: p.camera_b, scene_count: 0, take_count: 0, good_count: 0 })
+    Ok(Project { id, film_name: p.film_name, director: p.director, camera_op: p.camera_op, location: p.location, unit: p.unit, shoot_day: p.shoot_day, total_days: p.total_days, fps, camera_a: p.camera_a, camera_b: p.camera_b, scene_count: 0, take_count: 0, good_count: 0 })
 }
 
 pub fn update_project(app: &AppHandle, id: i64, p: NewProject) -> rusqlite::Result<()> {
     let conn = connect(app)?;
+    let fps = valid_fps(p.fps);
     conn.execute(
-        "UPDATE projects SET film_name=?1, director=?2, camera_op=?3, location=?4, unit=?5, shoot_day=?6, total_days=?7, camera_a=?8, camera_b=?9 WHERE id=?10",
-        params![p.film_name, p.director, p.camera_op, p.location, p.unit, p.shoot_day, p.total_days, p.camera_a, p.camera_b, id],
+        "UPDATE projects SET film_name=?1, director=?2, camera_op=?3, location=?4, unit=?5, shoot_day=?6, total_days=?7, fps=?8, camera_a=?9, camera_b=?10 WHERE id=?11",
+        params![p.film_name, p.director, p.camera_op, p.location, p.unit, p.shoot_day, p.total_days, fps, p.camera_a, p.camera_b, id],
     )?;
     Ok(())
 }
 
 pub fn remove_project(app: &AppHandle, id: i64) -> rusqlite::Result<()> {
     let conn = connect(app)?;
+    // Drop photo files first (rows go with the scenes below).
+    let scene_ids: Vec<i64> = conn
+        .prepare("SELECT id FROM scenes WHERE project_id=?1")
+        .and_then(|mut s| {
+            s.query_map(params![id], |r| r.get(0))?
+                .collect::<rusqlite::Result<Vec<i64>>>()
+        })
+        .unwrap_or_default();
+    for sid in scene_ids {
+        delete_scene_photos(app, &conn, sid, id);
+    }
+    let dir = photos_dir(app, id);
+    let _ = std::fs::remove_dir_all(dir);
     conn.execute("DELETE FROM takes WHERE scene_id IN (SELECT id FROM scenes WHERE project_id=?1)", params![id])?;
     conn.execute("DELETE FROM setups WHERE scene_id IN (SELECT id FROM scenes WHERE project_id=?1)", params![id])?;
     conn.execute("DELETE FROM scenes WHERE project_id=?1", params![id])?;
@@ -384,20 +437,21 @@ pub fn remove_project(app: &AppHandle, id: i64) -> rusqlite::Result<()> {
 pub fn duplicate_project(app: &AppHandle, id: i64) -> rusqlite::Result<Project> {
     let conn = connect(app)?;
     let src: NewProject = conn.query_row(
-        "SELECT film_name, director, camera_op, location, unit, shoot_day, total_days, camera_a, camera_b FROM projects WHERE id=?1",
+        "SELECT film_name, director, camera_op, location, unit, shoot_day, total_days, fps, camera_a, camera_b FROM projects WHERE id=?1",
         params![id],
         |r| {
             Ok(NewProject {
                 film_name: r.get(0)?, director: r.get(1)?, camera_op: r.get(2)?,
                 location: r.get(3)?, unit: r.get(4)?, shoot_day: r.get(5)?,
-                total_days: r.get(6)?, camera_a: r.get(7)?, camera_b: r.get(8)?,
+                total_days: r.get(6)?, fps: r.get(7).unwrap_or(25.0), camera_a: r.get(8)?, camera_b: r.get(9)?,
             })
         },
     )?;
     let name = format!("Copy of {}", src.film_name);
+    let fps = valid_fps(src.fps);
     conn.execute(
-        "INSERT INTO projects (film_name, director, camera_op, location, unit, shoot_day, total_days, camera_a, camera_b) VALUES (?,?,?,?,?,?,?,?,?)",
-        params![name, src.director, src.camera_op, src.location, src.unit, src.shoot_day, src.total_days, src.camera_a, src.camera_b],
+        "INSERT INTO projects (film_name, director, camera_op, location, unit, shoot_day, total_days, fps, camera_a, camera_b) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        params![name, src.director, src.camera_op, src.location, src.unit, src.shoot_day, src.total_days, fps, src.camera_a, src.camera_b],
     )?;
     let new_pid = conn.last_insert_rowid();
     // Copy scenes, remembering old -> new ids for setups and takes.
@@ -429,27 +483,51 @@ pub fn duplicate_project(app: &AppHandle, id: i64) -> rusqlite::Result<Project> 
         }
         // Copy takes one by one to remap setup ids.
         let mut tstmt = conn.prepare(
-            "SELECT take_no, tc_in, cam, lens, rating, int_ext, day, cam_file, audio_file, setup_id, tags, note, created_at FROM takes WHERE scene_id=?1",
+            "SELECT take_no, tc_in, cam, lens, rating, int_ext, day, duration_sec, cam_file, audio_file, setup_id, tags, note, created_at FROM takes WHERE scene_id=?1",
         )?;
-        let old_takes: Vec<(i64, String, String, String, String, String, i64, String, String, Option<i64>, String, String, String)> = tstmt
+        let old_takes: Vec<(i64, String, String, String, String, String, i64, f64, String, String, Option<i64>, String, String, String)> = tstmt
             .query_map(params![old_sid], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?, r.get(11)?, r.get(12)?))
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?, r.get(11)?, r.get(12)?, r.get(13)?))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         drop(tstmt);
-        for (take_no, tc_in, cam, lens, rating, int_ext, tday, cam_file, audio_file, setup_id, tags, note, created_at) in old_takes {
+        for (take_no, tc_in, cam, lens, rating, int_ext, tday, dur, cam_file, audio_file, setup_id, tags, note, created_at) in old_takes {
             let new_setup = setup_id.and_then(|s| setup_map.get(&s).copied());
             conn.execute(
-                "INSERT INTO takes (scene_id, take_no, tc_in, cam, lens, rating, int_ext, day, cam_file, audio_file, setup_id, tags, note, created_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                params![new_sid, take_no, tc_in, cam, lens, rating, int_ext, tday, cam_file, audio_file, new_setup, tags, note, created_at],
+                "INSERT INTO takes (scene_id, take_no, tc_in, cam, lens, rating, int_ext, day, duration_sec, cam_file, audio_file, setup_id, tags, note, created_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                params![new_sid, take_no, tc_in, cam, lens, rating, int_ext, tday, dur, cam_file, audio_file, new_setup, tags, note, created_at],
+            )?;
+        }
+        // Copy continuity stills with remapped setups.
+        let mut pstmt = conn.prepare(
+            "SELECT setup_id, filename, caption, created_at FROM photos WHERE scene_id=?1",
+        )?;
+        let old_photos: Vec<(Option<i64>, String, String, String)> = pstmt
+            .query_map(params![old_sid], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(pstmt);
+        let new_dir = photos_dir(app, new_pid);
+        let new_thumbs = new_dir.join("thumbs");
+        let _ = std::fs::create_dir_all(&new_thumbs);
+        for (old_setup, filename, caption, created_at) in old_photos {
+            let new_setup = old_setup.and_then(|s| setup_map.get(&s).copied());
+            let stem = unique_stem() + "_copy";
+            let ext = filename.rsplit_once('.').map(|(_, e)| e).unwrap_or("jpg");
+            let new_name = format!("{stem}.{ext}");
+            let (old_full, old_th) = photo_files(app, id, &filename);
+            let _ = std::fs::copy(&old_full, new_dir.join(&new_name));
+            let _ = std::fs::copy(&old_th, new_thumbs.join(format!("{stem}_thumb.jpg")));
+            conn.execute(
+                "INSERT INTO photos (scene_id, setup_id, filename, caption, created_at) VALUES (?,?,?,?,?)",
+                params![new_sid, new_setup, new_name, caption, created_at],
             )?;
         }
     }
     Ok(Project {
         id: new_pid, film_name: name, director: src.director, camera_op: src.camera_op,
         location: src.location, unit: src.unit, shoot_day: src.shoot_day, total_days: src.total_days,
-        camera_a: src.camera_a, camera_b: src.camera_b, scene_count: 0, take_count: 0, good_count: 0,
+        fps, camera_a: src.camera_a, camera_b: src.camera_b, scene_count: 0, take_count: 0, good_count: 0,
     })
 }
 
@@ -534,6 +612,8 @@ pub fn update_scene(app: &AppHandle, id: i64, s: NewScene) -> rusqlite::Result<(
 
 pub fn remove_scene(app: &AppHandle, id: i64) -> rusqlite::Result<()> {
     let conn = connect(app)?;
+    let project_id: i64 = conn.query_row("SELECT project_id FROM scenes WHERE id=?1", params![id], |r| r.get(0)).unwrap_or(0);
+    delete_scene_photos(app, &conn, id, project_id);
     conn.execute("DELETE FROM takes WHERE scene_id=?1", params![id])?;
     conn.execute("DELETE FROM setups WHERE scene_id=?1", params![id])?;
     conn.execute("DELETE FROM scenes WHERE id=?1", params![id])?;
@@ -581,8 +661,158 @@ pub fn remove_setup(app: &AppHandle, id: i64) -> rusqlite::Result<()> {
     let conn = connect(app)?;
     // Takes stay, they just lose their setup tag.
     conn.execute("UPDATE takes SET setup_id=NULL WHERE setup_id=?1", params![id])?;
+    conn.execute("UPDATE photos SET setup_id=NULL WHERE setup_id=?1", params![id])?;
     conn.execute("DELETE FROM setups WHERE id=?1", params![id])?;
     Ok(())
+}
+
+// ---------- Photos (continuity stills, stored locally) ----------
+
+fn photos_dir(app: &AppHandle, project_id: i64) -> PathBuf {
+    let dir = db_path(app);
+    let base = dir.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+    base.join("photos").join(project_id.to_string())
+}
+
+fn photo_project_of(conn: &Connection, scene_id: i64) -> rusqlite::Result<i64> {
+    conn.query_row("SELECT project_id FROM scenes WHERE id=?1", params![scene_id], |r| r.get(0))
+}
+
+pub fn fetch_photos(app: &AppHandle, scene_id: i64) -> rusqlite::Result<Vec<Photo>> {
+    let conn = connect(app)?;
+    let mut stmt = conn.prepare(
+        "SELECT p.id, p.scene_id, p.setup_id, COALESCE(su.name,''), p.filename, p.caption, p.created_at
+         FROM photos p LEFT JOIN setups su ON su.id = p.setup_id
+         WHERE p.scene_id=?1 ORDER BY p.id",
+    )?;
+    let rows = stmt.query_map(params![scene_id], |r| {
+        Ok(Photo {
+            id: r.get(0)?, scene_id: r.get(1)?,
+            setup_id: r.get(2).unwrap_or(None), setup_name: r.get(3)?,
+            filename: r.get(4)?, caption: r.get(5)?, created_at: r.get(6)?,
+        })
+    })?;
+    rows.collect()
+}
+
+fn unique_stem() -> String {
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    format!("{ms}")
+}
+
+pub fn import_photo(app: &AppHandle, scene_id: i64, setup_id: Option<i64>, src: PathBuf) -> rusqlite::Result<Photo> {
+    let conn = connect(app)?;
+    let project_id = photo_project_of(&conn, scene_id)?;
+    if let Some(sid) = setup_id {
+        if !setup_belongs(&conn, sid, scene_id) {
+            return Err(rusqlite::Error::InvalidParameterName("setup does not belong to this scene".into()));
+        }
+    }
+    // Decode once to validate + build a thumbnail; rejects HEIC/RAW etc.
+    let img = image::open(&src).map_err(|e| rusqlite::Error::InvalidParameterName(format!("not a readable image: {e}")))?;
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .filter(|e| ["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff", "gif"].contains(&e.as_str()))
+        .unwrap_or_else(|| "jpg".to_string());
+    let dir = photos_dir(app, project_id);
+    let thumbs = dir.join("thumbs");
+    std::fs::create_dir_all(&thumbs).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+    let stem = unique_stem();
+    let filename = format!("{stem}.{ext}");
+    let dest = dir.join(&filename);
+    std::fs::copy(&src, &dest).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+    // 480px thumbnail for grids + contact sheets; full file kept for lightbox.
+    let thumb = img.thumbnail(480, 480);
+    let thumb_name = format!("{stem}_thumb.jpg");
+    if thumb.save_with_format(thumbs.join(&thumb_name), image::ImageFormat::Jpeg).is_err() {
+        let _ = std::fs::remove_file(&dest);
+        return Err(rusqlite::Error::InvalidParameterName("could not thumbnail image".into()));
+    }
+    conn.execute(
+        "INSERT INTO photos (scene_id, setup_id, filename, caption) VALUES (?,?,?,?)",
+        params![scene_id, setup_id, filename, ""],
+    )?;
+    let id = conn.last_insert_rowid();
+    let created: String = conn.query_row("SELECT created_at FROM photos WHERE id=?1", params![id], |r| r.get(0))?;
+    let setup_name: String = match setup_id {
+        Some(sid) => conn.query_row("SELECT name FROM setups WHERE id=?1", params![sid], |r| r.get(0)).unwrap_or_default(),
+        None => String::new(),
+    };
+    Ok(Photo { id, scene_id, setup_id, setup_name, filename, caption: String::new(), created_at: created })
+}
+
+fn photo_files(app: &AppHandle, project_id: i64, filename: &str) -> (PathBuf, PathBuf) {
+    let dir = photos_dir(app, project_id);
+    let stem = filename.rsplit_once('.').map(|(s, _)| s).unwrap_or(filename);
+    (dir.join(filename), dir.join("thumbs").join(format!("{stem}_thumb.jpg")))
+}
+
+pub fn photo_data_url(app: &AppHandle, id: i64, thumb: bool) -> rusqlite::Result<String> {
+    let conn = connect(app)?;
+    let (scene_id, filename): (i64, String) = conn.query_row(
+        "SELECT scene_id, filename FROM photos WHERE id=?1",
+        params![id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let project_id = photo_project_of(&conn, scene_id)?;
+    let (full, th) = photo_files(app, project_id, &filename);
+    let path = if thumb { th } else { full };
+    let bytes = std::fs::read(&path).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+    let mime = if thumb {
+        "image/jpeg"
+    } else if filename.to_lowercase().ends_with(".png") {
+        "image/png"
+    } else if filename.to_lowercase().ends_with(".webp") {
+        "image/webp"
+    } else if filename.to_lowercase().ends_with(".gif") {
+        "image/gif"
+    } else {
+        "image/jpeg"
+    };
+    use base64::Engine as _;
+    Ok(format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes)))
+}
+
+pub fn update_photo_caption(app: &AppHandle, id: i64, caption: String) -> rusqlite::Result<()> {
+    let conn = connect(app)?;
+    conn.execute("UPDATE photos SET caption=?1 WHERE id=?2", params![caption, id])?;
+    Ok(())
+}
+
+pub fn remove_photo(app: &AppHandle, id: i64) -> rusqlite::Result<()> {
+    let conn = connect(app)?;
+    let (scene_id, filename): (i64, String) = conn.query_row(
+        "SELECT scene_id, filename FROM photos WHERE id=?1",
+        params![id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let project_id = photo_project_of(&conn, scene_id).unwrap_or(0);
+    conn.execute("DELETE FROM photos WHERE id=?1", params![id])?;
+    let (full, th) = photo_files(app, project_id, &filename);
+    let _ = std::fs::remove_file(full);
+    let _ = std::fs::remove_file(th);
+    Ok(())
+}
+
+fn delete_scene_photos(app: &AppHandle, conn: &Connection, scene_id: i64, project_id: i64) {
+    let files: Vec<String> = conn
+        .prepare("SELECT filename FROM photos WHERE scene_id=?1")
+        .and_then(|mut s| {
+            s.query_map(params![scene_id], |r| r.get(0))?
+                .collect::<rusqlite::Result<Vec<String>>>()
+        })
+        .unwrap_or_default();
+    let _ = conn.execute("DELETE FROM photos WHERE scene_id=?1", params![scene_id]);
+    for f in files {
+        let (full, th) = photo_files(app, project_id, &f);
+        let _ = std::fs::remove_file(full);
+        let _ = std::fs::remove_file(th);
+    }
 }
 
 // ---------- Takes ----------
@@ -591,15 +821,16 @@ pub fn fetch_takes(app: &AppHandle, scene_id: i64) -> rusqlite::Result<Vec<Take>
     let conn = connect(app)?;
     // connect() always runs the int_ext/day migrations first, so the column exists.
     let mut stmt = conn.prepare(
-        "SELECT id, scene_id, take_no, tc_in, cam, lens, rating, int_ext, day, cam_file, audio_file, setup_id, tags, note, created_at FROM takes WHERE scene_id=?1 ORDER BY take_no",
+        "SELECT id, scene_id, take_no, tc_in, cam, lens, rating, int_ext, day, duration_sec, cam_file, audio_file, setup_id, tags, note, created_at FROM takes WHERE scene_id=?1 ORDER BY take_no",
     )?;
     let rows = stmt.query_map(params![scene_id], |r| {
         Ok(Take {
             id: r.get(0)?, scene_id: r.get(1)?, take_no: r.get(2)?, tc_in: r.get(3)?,
             cam: r.get(4)?, lens: r.get(5)?, rating: r.get(6)?, int_ext: r.get(7)?,
-            day: r.get(8).unwrap_or(1), cam_file: r.get(9).unwrap_or_default(), audio_file: r.get(10).unwrap_or_default(),
-            setup_id: r.get(11).unwrap_or(None),
-            tags: r.get(12)?, note: r.get(13)?, created_at: r.get(14)?,
+            day: r.get(8).unwrap_or(1), duration_sec: r.get(9).unwrap_or(0.0),
+            cam_file: r.get(10).unwrap_or_default(), audio_file: r.get(11).unwrap_or_default(),
+            setup_id: r.get(12).unwrap_or(None),
+            tags: r.get(13)?, note: r.get(14)?, created_at: r.get(15)?,
         })
     })?;
     rows.collect()
@@ -637,12 +868,12 @@ pub fn insert_take(app: &AppHandle, t: NewTake) -> rusqlite::Result<Take> {
         |r| r.get(0),
     )?;
     conn.execute(
-        "INSERT INTO takes (scene_id, take_no, tc_in, cam, lens, rating, int_ext, day, cam_file, audio_file, setup_id, tags, note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        params![t.scene_id, no, t.tc_in, t.cam, t.lens, t.rating, t.int_ext, t.day, t.cam_file, t.audio_file, t.setup_id, t.tags, t.note],
+        "INSERT INTO takes (scene_id, take_no, tc_in, cam, lens, rating, int_ext, day, duration_sec, cam_file, audio_file, setup_id, tags, note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        params![t.scene_id, no, t.tc_in, t.cam, t.lens, t.rating, t.int_ext, t.day, t.duration_sec.max(0.0), t.cam_file, t.audio_file, t.setup_id, t.tags, t.note],
     )?;
     let id = conn.last_insert_rowid();
     let created: String = conn.query_row("SELECT created_at FROM takes WHERE id=?1", params![id], |r| r.get(0))?;
-    Ok(Take { id, scene_id: t.scene_id, take_no: no, tc_in: t.tc_in, cam: t.cam, lens: t.lens, rating: t.rating, int_ext: t.int_ext, day: t.day, cam_file: t.cam_file, audio_file: t.audio_file, setup_id: t.setup_id, tags: t.tags, note: t.note, created_at: created })
+    Ok(Take { id, scene_id: t.scene_id, take_no: no, tc_in: t.tc_in, cam: t.cam, lens: t.lens, rating: t.rating, int_ext: t.int_ext, day: t.day, duration_sec: t.duration_sec.max(0.0), cam_file: t.cam_file, audio_file: t.audio_file, setup_id: t.setup_id, tags: t.tags, note: t.note, created_at: created })
 }
 
 pub fn remove_take(app: &AppHandle, take_id: i64) -> rusqlite::Result<()> {
@@ -660,8 +891,8 @@ pub fn update_take(app: &AppHandle, id: i64, t: UpdateTake) -> rusqlite::Result<
         }
     }
     conn.execute(
-        "UPDATE takes SET tc_in=?1, cam=?2, lens=?3, rating=?4, int_ext=?5, day=?6, cam_file=?7, audio_file=?8, setup_id=?9, tags=?10, note=?11 WHERE id=?12",
-        params![t.tc_in, t.cam, t.lens, t.rating, t.int_ext, t.day, t.cam_file, t.audio_file, t.setup_id, t.tags, t.note, id],
+        "UPDATE takes SET tc_in=?1, cam=?2, lens=?3, rating=?4, int_ext=?5, day=?6, duration_sec=?7, cam_file=?8, audio_file=?9, setup_id=?10, tags=?11, note=?12 WHERE id=?13",
+        params![t.tc_in, t.cam, t.lens, t.rating, t.int_ext, t.day, t.duration_sec.max(0.0), t.cam_file, t.audio_file, t.setup_id, t.tags, t.note, id],
     )?;
     Ok(())
 }
@@ -678,7 +909,7 @@ pub fn set_project_day(app: &AppHandle, id: i64, day: i64) -> rusqlite::Result<(
 pub fn fetch_project_takes(app: &AppHandle, project_id: i64) -> rusqlite::Result<Vec<TakeWithScene>> {
     let conn = connect(app)?;
     let mut stmt = conn.prepare(
-        "SELECT t.id, t.scene_id, s.number, s.title, t.take_no, t.tc_in, t.cam, t.lens, t.rating, t.int_ext, t.day, t.cam_file, t.audio_file, t.setup_id, su.name, t.tags, t.note, t.created_at
+        "SELECT t.id, t.scene_id, s.number, s.title, t.take_no, t.tc_in, t.cam, t.lens, t.rating, t.int_ext, t.day, t.duration_sec, t.cam_file, t.audio_file, t.setup_id, su.name, t.tags, t.note, t.created_at
          FROM takes t JOIN scenes s ON s.id = t.scene_id LEFT JOIN setups su ON su.id = t.setup_id
          WHERE s.project_id = ?1
          ORDER BY CAST(s.number AS INTEGER), s.number, t.take_no",
@@ -687,10 +918,11 @@ pub fn fetch_project_takes(app: &AppHandle, project_id: i64) -> rusqlite::Result
         Ok(TakeWithScene {
             id: r.get(0)?, scene_id: r.get(1)?, scene_number: r.get(2)?, scene_title: r.get(3)?,
             take_no: r.get(4)?, tc_in: r.get(5)?, cam: r.get(6)?, lens: r.get(7)?,
-            rating: r.get(8)?, int_ext: r.get(9)?, day: r.get(10)?, cam_file: r.get(11)?, audio_file: r.get(12)?,
-            setup_id: r.get(13).unwrap_or(None), setup_name: r.get(14).unwrap_or_default(),
-            tags: r.get(15)?, note: r.get(16)?,
-            created_at: r.get(17)?,
+            rating: r.get(8)?, int_ext: r.get(9)?, day: r.get(10)?, duration_sec: r.get(11).unwrap_or(0.0),
+            cam_file: r.get(12)?, audio_file: r.get(13)?,
+            setup_id: r.get(14).unwrap_or(None), setup_name: r.get(15).unwrap_or_default(),
+            tags: r.get(16)?, note: r.get(17)?,
+            created_at: r.get(18)?,
         })
     })?;
     rows.collect()

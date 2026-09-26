@@ -33,6 +33,7 @@
     <div class="brand"><span class="slate">SLATE</span> <span class="log">LOG</span></div>
     <div class="sub">Scene &amp; take tracker</div>
     <div class="scenes-head"><span>Scenes</span><span id="scene-count">0</span></div>
+    <button id="btn-progress" class="btn ghost" style="width:100%;margin-bottom:10px" title="Wrap progress board">▦ Wrap progress</button>
     <input id="filter" class="filter" placeholder="Filter scenes..." autocomplete="off">
     <div id="scene-list" class="scene-list"></div>
     <div class="side-foot"><span id="stat-total">0 takes</span><span id="stat-rate">0% good</span></div>
@@ -56,6 +57,8 @@
     </header>
 
     <section id="scene-head" class="scene-head"></section>
+
+    <section id="photos" class="photos"></section>
 
     <section class="card">
       <div class="card-head"><strong>Log this take</strong><span class="tc">TC in&nbsp; <b id="tc-now">--:--:--</b><input id="take-tc" class="tc-input hidden" maxlength="8" placeholder="HH:MM:SS" title="Manual timecode — enable in settings"></span></div>
@@ -83,11 +86,15 @@
         <label class="fld">Camera file<input id="take-camfile" placeholder="A001C004…" autocomplete="off"></label>
         <label class="fld">Audio file<input id="take-audiofile" placeholder="240901_T01…" autocomplete="off"></label>
       </div>
+      <div class="timer-row">
+        <button id="btn-timer" class="btn ghost" title="Time this take with a stopwatch">⏱ Start timer</button>
+        <b id="take-timer">00:00</b>
+      </div>
       <button id="btn-log" class="btn primary big">Log take</button>
       <div class="keys-hint">Space log · G good · M maybe · B bad · ↑/↓ scene</div>
     </section>
 
-    <section class="logged-head"><strong>Logged so far</strong><span id="takes-count"></span><span class="logged-spacer"></span><button id="btn-export" class="btn ghost">▦ Export to Excel</button></section>
+    <section class="logged-head"><strong>Logged so far</strong><span id="takes-count"></span><span class="logged-spacer"></span><button id="btn-edl" class="btn ghost" title="Good-selects timeline for Resolve / Premiere / Avid">EDL selects</button><button id="btn-export" class="btn ghost">▦ Export to Excel</button></section>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Scene</th><th>Setup</th><th>Day</th><th>Take</th><th>TC in</th><th>Cam</th><th>INT/EXT</th><th>Lens</th><th>Camera file</th><th>Audio file</th><th>Rating</th><th>Quick notes</th><th>Description</th><th></th></tr></thead>
@@ -99,11 +106,38 @@
   </main>
 </div>
 
+<div id="view-progress" class="home hidden">
+  <header class="home-head">
+    <div>
+      <div class="brand"><span class="slate">SLATE</span> <span class="log">LOG</span></div>
+      <div class="sub" id="progress-sub">Wrap progress</div>
+    </div>
+    <div class="home-actions">
+      <button id="btn-progress-back" class="btn ghost">← Back</button>
+    </div>
+  </header>
+  <div id="progress-body"></div>
+</div>
+
+<div id="modal-lightbox" class="modal hidden">
+  <div class="modal-card wide">
+    <img id="lightbox-img" alt="Continuity still">
+    <label>Caption<input id="lightbox-cap" placeholder="e.g. Hat on left chair" autocomplete="off"></label>
+    <div class="modal-actions">
+      <button id="btn-lightbox-del" class="btn ghost" style="color:#e0705c">Delete photo</button>
+      <span class="logged-spacer"></span>
+      <button id="btn-lightbox-save" class="btn primary">Save caption</button>
+      <button id="btn-lightbox-close" class="btn ghost">Close</button>
+    </div>
+  </div>
+</div>
+
 <div id="view-report" class="report hidden">
   <div class="report-bar no-print">
     <button id="btn-report-back" class="btn ghost">← Back</button>
     <strong>Daily report</strong>
     <label class="daypick">Day <input id="report-day" type="number" min="1" value="1"></label>
+    <button id="btn-pdf" class="btn ghost" title="Save this day as a PDF file">Save PDF</button>
     <button id="btn-print" class="btn primary">⎙ Print / PDF</button>
   </div>
   <div id="report-body" class="sheet"></div>
@@ -155,6 +189,7 @@
       <label>Setup<select id="e-setup"></select></label>
       <label>Camera file<input id="e-camfile" autocomplete="off"></label>
       <label>Audio file<input id="e-audiofile" autocomplete="off"></label>
+      <label>Duration (sec)<input id="e-dur" type="number" min="0" step="0.1" placeholder="0"></label>
     </div>
     <label>Quick notes<input id="e-tags" placeholder="Clean take, ..."></label>
     <label>Description<textarea id="e-note" rows="2"></textarea></label>
@@ -174,6 +209,7 @@
       <label>Camera op<input id="p-cameraop" placeholder="Camera operator"></label>
       <label>Location<input id="p-location" placeholder="Location"></label>
       <label>Unit<input id="p-unit" placeholder="Unit"></label>
+      <label>Frame rate<select id="p-fps"><option value="23.976">23.976</option><option value="24">24</option><option value="25" selected>25</option><option value="29.97">29.97</option><option value="30">30</option><option value="50">50</option><option value="60">60</option></select></label>
     </div>
     <div class="modal-actions">
       <button id="btn-cancel-project" class="btn ghost">Cancel</button>
