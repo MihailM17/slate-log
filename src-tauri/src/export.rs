@@ -1,4 +1,4 @@
-use crate::db::{Scene, Take};
+use crate::db::{Scene, TakeWithScene};
 use rust_xlsxwriter::{Format, Workbook};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -6,25 +6,26 @@ fn write_take_row(
     ws: &mut rust_xlsxwriter::Worksheet,
     row: u32,
     scene: &Scene,
-    t: &Take,
+    t: &TakeWithScene,
     wrap: &Format,
 ) -> Result<(), String> {
     let ie = if t.int_ext.is_empty() { &scene.int_ext } else { &t.int_ext };
     let day = if t.day == 0 { scene.day } else { t.day };
     ws.write_string(row, 0, &scene.number).map_err(|e| e.to_string())?;
-    ws.write_string(row, 1, &scene.title).map_err(|e| e.to_string())?;
-    ws.write_string(row, 2, &scene.location).map_err(|e| e.to_string())?;
-    ws.write_number(row, 3, day as f64).map_err(|e| e.to_string())?;
-    ws.write_string(row, 4, ie).map_err(|e| e.to_string())?;
-    ws.write_number(row, 5, t.take_no as f64).map_err(|e| e.to_string())?;
-    ws.write_string(row, 6, &t.tc_in).map_err(|e| e.to_string())?;
-    ws.write_string(row, 7, &t.cam).map_err(|e| e.to_string())?;
-    ws.write_string(row, 8, &t.lens).map_err(|e| e.to_string())?;
-    ws.write_string(row, 9, &t.cam_file).map_err(|e| e.to_string())?;
-    ws.write_string(row, 10, &t.audio_file).map_err(|e| e.to_string())?;
-    ws.write_string(row, 11, &t.rating).map_err(|e| e.to_string())?;
-    ws.write_string(row, 12, &t.tags).map_err(|e| e.to_string())?;
-    ws.write_string_with_format(row, 13, &t.note, wrap)
+    ws.write_string(row, 1, &t.setup_name).map_err(|e| e.to_string())?;
+    ws.write_string(row, 2, &scene.title).map_err(|e| e.to_string())?;
+    ws.write_string(row, 3, &scene.location).map_err(|e| e.to_string())?;
+    ws.write_number(row, 4, day as f64).map_err(|e| e.to_string())?;
+    ws.write_string(row, 5, ie).map_err(|e| e.to_string())?;
+    ws.write_number(row, 6, t.take_no as f64).map_err(|e| e.to_string())?;
+    ws.write_string(row, 7, &t.tc_in).map_err(|e| e.to_string())?;
+    ws.write_string(row, 8, &t.cam).map_err(|e| e.to_string())?;
+    ws.write_string(row, 9, &t.lens).map_err(|e| e.to_string())?;
+    ws.write_string(row, 10, &t.cam_file).map_err(|e| e.to_string())?;
+    ws.write_string(row, 11, &t.audio_file).map_err(|e| e.to_string())?;
+    ws.write_string(row, 12, &t.rating).map_err(|e| e.to_string())?;
+    ws.write_string(row, 13, &t.tags).map_err(|e| e.to_string())?;
+    ws.write_string_with_format(row, 14, &t.note, wrap)
         .map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -33,7 +34,7 @@ fn write_take_row(
 pub fn write_workbook(
     path: &str,
     scenes: &[Scene],
-    takes_by_scene: &[(Scene, Vec<Take>)],
+    takes_by_scene: &[(Scene, Vec<TakeWithScene>)],
     include_good: bool,
     include_days: bool,
 ) -> Result<(), String> {
@@ -46,7 +47,7 @@ pub fn write_workbook(
     // --- Sheet 1: All takes ---
     let ws = workbook.add_worksheet();
     ws.set_name("All Takes").map_err(|e| e.to_string())?;
-    let headers = ["Scene", "Title", "Location", "Day", "INT/EXT", "Take", "TC In", "Cam", "Lens", "Camera file", "Audio file", "Rating", "Quick notes", "Description"];
+    let headers = ["Scene", "Setup", "Title", "Location", "Day", "INT/EXT", "Take", "TC In", "Cam", "Lens", "Camera file", "Audio file", "Rating", "Quick notes", "Description"];
     for (c, h) in headers.iter().enumerate() {
         ws.write_string_with_format(0, c as u16, *h, &header)
             .map_err(|e| e.to_string())?;

@@ -2,8 +2,10 @@
 
 Lightweight, offline-first scene & take tracker for film shoots. Mac + Windows from one Rust codebase.
 
-- Projects home screen (DaVinci-style picker), per-project scenes & takes
-- Fast take logging: Bad / Maybe / Good, camera, lens (presets + custom), INT/EXT, shoot day, timecode, quick notes
+- Projects home screen (DaVinci-style picker), per-project scenes, **setups & takes**
+- Fast take logging: Bad / Maybe / Good, camera, lens (presets + custom), INT/EXT, shoot day, timecode (auto or manual), camera + audio filenames with auto-increment, quick notes
+- Scene status (Not shot / Partial / Complete), per-day shoot tracking
+- **CSV scene import** (with template), **daily report** view (print / save as PDF)
 - SQLite storage on your machine — no account, no cloud, works offline on set
 - Excel export: All Takes, Good Selects, per-day stats sheets
 

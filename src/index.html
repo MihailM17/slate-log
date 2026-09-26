@@ -48,6 +48,9 @@
       </div>
       <div class="top-actions">
         <button id="btn-settings" class="btn ghost" title="App settings">⚙</button>
+        <button id="btn-import" class="btn ghost" title="Import scenes from CSV">⤓ Import</button>
+        <button id="btn-template" class="btn ghost" title="Save a blank CSV template to Documents">Template</button>
+        <button id="btn-report" class="btn ghost" title="Daily report (print / PDF)">⎙ Report</button>
         <button id="btn-new-scene" class="btn primary">+ New scene</button>
       </div>
     </header>
@@ -64,6 +67,8 @@
           <button data-v="Good" class="on" title="Good = best take, use in edit">Good</button>
         </div>
       </div>
+      <div class="legend-row"><span class="quick-label">Setup (this take)</span><button id="btn-add-setup" class="mini-btn" title="Add a setup to this scene">+ New setup</button></div>
+      <div id="setup-chips" class="chips"></div>
       <div class="grid2-take">
         <label class="fld">Take notes<textarea id="note" rows="2" placeholder="What happened in this take..."></textarea></label>
         <div><div class="quick-label">INT / EXT (this take)</div><div class="seg" id="seg-take-intext"><button data-v="INT" class="on">INT</button><button data-v="EXT">EXT</button></div></div>
@@ -85,13 +90,35 @@
     <section class="logged-head"><strong>Logged so far</strong><span id="takes-count"></span><span class="logged-spacer"></span><button id="btn-export" class="btn ghost">▦ Export to Excel</button></section>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Scene</th><th>Day</th><th>Take</th><th>TC in</th><th>Cam</th><th>INT/EXT</th><th>Lens</th><th>Camera file</th><th>Audio file</th><th>Rating</th><th>Quick notes</th><th>Description</th><th></th></tr></thead>
+        <thead><tr><th>Scene</th><th>Setup</th><th>Day</th><th>Take</th><th>TC in</th><th>Cam</th><th>INT/EXT</th><th>Lens</th><th>Camera file</th><th>Audio file</th><th>Rating</th><th>Quick notes</th><th>Description</th><th></th></tr></thead>
         <tbody id="takes-body"></tbody>
       </table>
     </div>
     <p class="foot-note">○ Bad = no good — ◐ Maybe = hold for review — ● Good = use in edit.</p>
     </div>
   </main>
+</div>
+
+<div id="view-report" class="report hidden">
+  <div class="report-bar no-print">
+    <button id="btn-report-back" class="btn ghost">← Back</button>
+    <strong>Daily report</strong>
+    <label class="daypick">Day <input id="report-day" type="number" min="1" value="1"></label>
+    <button id="btn-print" class="btn primary">⎙ Print / PDF</button>
+  </div>
+  <div id="report-body" class="sheet"></div>
+</div>
+
+<div id="modal-setup" class="modal hidden">
+  <div class="modal-card small">
+    <h2>New setup</h2>
+    <label>Setup name<input id="setup-input" placeholder="Wide" autocomplete="off"></label>
+    <p class="tiny">e.g. Wide, MCU Sarah, Insert hands. Takes attach to one setup.</p>
+    <div class="modal-actions">
+      <button id="btn-cancel-setup" class="btn ghost">Cancel</button>
+      <button id="btn-save-setup" class="btn primary">Add setup</button>
+    </div>
+  </div>
 </div>
 
 <div id="modal" class="modal hidden">
@@ -103,6 +130,7 @@
       <label>INT/EXT<select id="f-intext"><option>INT</option><option>EXT</option></select></label>
       <label>Day part<select id="f-daypart"><option>Day</option><option>Dusk</option><option>Night</option><option>Dawn</option></select></label>
       <label>Shoot day<input id="f-day" type="number" min="1" value="1"></label>
+      <label>Status<select id="f-status"><option>Not shot</option><option>Partial</option><option>Complete</option></select></label>
     </div>
     <label>Location<input id="f-location" placeholder="Lift station, Vitosha"></label>
     <label>Camera<input id="f-camera" placeholder="A · Sony FX6"></label>
@@ -124,6 +152,7 @@
       <label>Lens<input id="e-lens" autocomplete="off"></label>
       <label>INT/EXT<select id="e-intext"><option>INT</option><option>EXT</option></select></label>
       <label>Shoot day<input id="e-day" type="number" min="1"></label>
+      <label>Setup<select id="e-setup"></select></label>
       <label>Camera file<input id="e-camfile" autocomplete="off"></label>
       <label>Audio file<input id="e-audiofile" autocomplete="off"></label>
     </div>

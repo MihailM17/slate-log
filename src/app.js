@@ -26,9 +26,9 @@ function saveSettings() {
 }
 const state = {
   projects: [], activeProjectId: null,
-  scenes: [], takes: [], allTakes: [], activeId: null,
+  scenes: [], takes: [], allTakes: [], setups: [], activeId: null,
   rating: S.defaultRating, lens: S.defaultLens, takeIntExt: S.defaultIntExt, tags: new Set(),
-  takeNo: 1, filter: "", projectQuery: "", editingSceneId: null, editingProjectId: null, editingTakeId: null,
+  takeNo: 1, takeSetupId: null, filter: "", projectQuery: "", editingSceneId: null, editingProjectId: null, editingTakeId: null,
 };
 let takeCam = "A";
 
@@ -137,19 +137,61 @@ function renderHome() {
   });
 }
 
+function showView(name) {
+  $("view-home").classList.toggle("hidden", name !== "home");
+  $("view-app").classList.toggle("hidden", name !== "app");
+  $("view-report").classList.toggle("hidden", name !== "report");
+}
+
 async function openProject(id) {
   state.activeProjectId = id; state.activeId = null;
-  state.scenes = []; state.takes = []; state.allTakes = [];
-  $("view-home").classList.add("hidden");
-  $("view-app").classList.remove("hidden");
+  state.scenes = []; state.takes = []; state.allTakes = []; state.setups = [];
+  showView("app");
   await loadScenes();
 }
 
 async function goHome() {
   state.activeProjectId = null; state.activeId = null;
-  $("view-app").classList.add("hidden");
-  $("view-home").classList.remove("hidden");
+  showView("home");
   await loadProjects();
+}
+
+// ---------- daily report (print / save as PDF) ----------
+function openReport() {
+  if (!state.activeProjectId) { toast("Open a project first"); return; }
+  $("report-day").value = active()?.day ?? activeProject()?.shoot_day ?? 1;
+  renderReport();
+  showView("report");
+}
+
+function renderReport() {
+  const p = activeProject(); if (!p) return;
+  const day = parseInt($("report-day").value) || 1;
+  const takes = state.allTakes.filter((t) => (t.day ?? 1) === day);
+  const scenes = state.scenes.filter((s) => (s.day ?? 1) === day);
+  const good = takes.filter((t) => t.rating === "Good").length;
+  const maybe = takes.filter((t) => t.rating === "Maybe").length;
+  const bad = takes.filter((t) => t.rating === "Bad").length;
+  const done = scenes.filter((s) => s.status === "Complete").length;
+  const part = scenes.filter((s) => s.status === "Partial").length;
+  const today = new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  const row = (t) => `<tr><td><b>${esc(t.scene_number)}</b>${t.setup_name ? " · " + esc(t.setup_name) : ""}</td><td>${pad(t.take_no)}</td><td>${esc(t.tc_in)}</td><td>${esc(t.cam)}</td><td>${esc(t.lens)}</td><td>${esc(t.cam_file)}</td><td>${esc(t.audio_file)}</td><td>${esc(t.rating)}</td><td>${esc(t.tags)}</td><td>${esc(t.note)}</td></tr>`;
+  $("report-body").innerHTML = `
+    <h1>${esc(p.film_name) || "Untitled film"} — Daily report</h1>
+    <p class="rmeta">Day ${day} · ${esc(today)}${p.director ? " · Dir. " + esc(p.director) : ""}${p.location ? " · " + esc(p.location) : ""}</p>
+    <div class="statgrid">
+      <div><b>${takes.length}</b><span>takes</span></div>
+      <div><b>${good}</b><span>good</span></div>
+      <div><b>${maybe}</b><span>maybe</span></div>
+      <div><b>${bad}</b><span>bad</span></div>
+      <div><b>${done}/${scenes.length}</b><span>scenes complete${part ? ` (${part} partial)` : ""}</span></div>
+    </div>
+    <h2>Good selects</h2>
+    ${good ? `<table><thead><tr><th>Scene</th><th>Take</th><th>TC</th><th>Cam</th><th>Lens</th><th>Camera file</th><th>Audio file</th><th>Notes</th></tr></thead><tbody>${takes.filter((t) => t.rating === "Good").map((t) => `<tr><td><b>${esc(t.scene_number)}</b>${t.setup_name ? " · " + esc(t.setup_name) : ""}</td><td>${pad(t.take_no)}</td><td>${esc(t.tc_in)}</td><td>${esc(t.cam)}</td><td>${esc(t.lens)}</td><td>${esc(t.cam_file)}</td><td>${esc(t.audio_file)}</td><td>${esc(t.note || t.tags)}</td></tr>`).join("")}</tbody></table>` : "<p>No good takes logged for this day yet.</p>"}
+    <h2>All takes</h2>
+    ${takes.length ? `<table><thead><tr><th>Scene</th><th>Take</th><th>TC</th><th>Cam</th><th>Lens</th><th>Camera file</th><th>Audio file</th><th>Rating</th><th>Notes</th><th>Description</th></tr></thead><tbody>${takes.map(row).join("")}</tbody></table>` : "<p>Nothing logged for this day yet.</p>"}
+    <h2>Scenes</h2>
+    ${scenes.length ? `<table><thead><tr><th>Scene</th><th>Title</th><th>Status</th><th>Takes</th></tr></thead><tbody>${scenes.map((s) => `<tr><td><b>${esc(s.number)}</b></td><td>${esc(s.title)}</td><td>${esc(s.status || "Not shot")}</td><td>${s.take_count ?? 0}</td></tr>`).join("")}</tbody></table>` : "<p>No scenes scheduled for this day.</p>"}`;
 }
 
 function renderProjectHeader() {
@@ -168,7 +210,7 @@ async function stepDay(delta) {
   if (sc) {
     // Day lives on the scene — the stepper is a quick way to set it.
     const day = Math.max(1, (sc.day || 1) + delta);
-    const payload = { number: sc.number, title: sc.title, int_ext: sc.int_ext, daypart: sc.daypart, description: sc.description, camera_default: sc.camera_default, day, location: sc.location || "" };
+    const payload = { number: sc.number, title: sc.title, int_ext: sc.int_ext, daypart: sc.daypart, description: sc.description, camera_default: sc.camera_default, day, location: sc.location || "", status: sc.status || "Not shot" };
     try { await invoke("update_scene", { id: sc.id, scene: payload }); } catch (e) { toast("Day change failed: " + e); return; }
     sc.day = day;
     sndClick();
@@ -271,11 +313,13 @@ async function loadTakes() {
   try {
     state.takes = await invoke("list_takes", { sceneId: sc.id });
     state.takeNo = await invoke("next_take", { sceneId: sc.id });
+    state.setups = await invoke("list_setups", { sceneId: sc.id });
   } catch { state.takes = []; state.takeNo = 1; }
   // defaults for this take follow the scene but stay editable per take
   state.takeIntExt = sc.int_ext || "INT";
+  state.takeSetupId = null;
   takeCam = sc.camera_default || S.defaultCam || "A";
-  syncTakeSeg(); syncCamBtn(); syncLensSeg();
+  syncTakeSeg(); syncCamBtn(); syncLensSeg(); renderSetupChips();
   if (S.manualTC) $("take-tc").value = nowTC();
   // filenames continue from the last take of this scene (C0004 -> C0005)
   const last = [...state.takes].sort((a, b) => a.take_no - b.take_no).pop();
@@ -304,7 +348,7 @@ function renderScenes() {
   rows.forEach((s) => {
     const d = document.createElement("div");
     d.className = "scene" + (s.id === state.activeId ? " active" : "");
-    d.innerHTML = `<span class="num">${esc(s.number)}</span><div><div class="t">${esc(s.title) || "(untitled)"}</div><div class="m"><span class="badge">${esc(s.int_ext)}</span><span>${esc(s.daypart)} · Day ${s.day ?? 1} · ${s.take_count ?? 0} takes${s.location ? " · " + esc(s.location) : ""}</span></div></div>
+    d.innerHTML = `<span class="num">${esc(s.number)}</span><div><div class="t">${esc(s.title) || "(untitled)"}</div><div class="m"><span class="badge">${esc(s.int_ext)}</span><span>${esc(s.daypart)} · Day ${s.day ?? 1} · ${s.take_count ?? 0} takes${s.location ? " · " + esc(s.location) : ""}${s.status && s.status !== "Not shot" ? " · " + esc(s.status) : ""}</span></div></div>
       <div class="row-actions"><button class="mini-btn" data-act="edit" title="Edit scene">✎</button><button class="mini-btn danger" data-act="del" title="Delete scene + its takes">×</button></div>`;
     d.onclick = async (e) => {
       const act = e.target.dataset?.act;
@@ -347,6 +391,7 @@ function openEditScene(s) {
   $("f-intext").value = s.int_ext; $("f-daypart").value = s.daypart;
   $("f-camera").value = s.camera_default; $("f-desc").value = s.description;
   $("f-location").value = s.location || "";
+  $("f-status").value = s.status || "Not shot";
   $("f-day").value = s.day ?? 1;
   $("modal").classList.remove("hidden");
 }
@@ -355,12 +400,28 @@ function renderHead() {
   const s = active();
   if (!s) { $("scene-head").innerHTML = `<p class="empty-hint">Select or create a scene to start logging.</p>`; return; }
   const p = activeProject();
-  $("scene-head").innerHTML = `<h2><span class="n">${esc(s.number)}</span>${esc(s.int_ext)}. ${esc(s.title || "").toUpperCase()} — ${esc(s.daypart).toUpperCase()}<button class="scene-edit-btn" id="btn-edit-scene">✎ Edit</button></h2>
+  $("scene-head").innerHTML = `<h2><span class="n">${esc(s.number)}</span>${esc(s.int_ext)}. ${esc(s.title || "").toUpperCase()} — ${esc(s.daypart).toUpperCase()}<button class="scene-edit-btn" id="btn-edit-scene">✎ Edit</button><button class="status-btn ${esc(s.status || "Not shot").replace(" ", "")}" id="btn-status" title="Tap to cycle shoot status">${esc(s.status || "Not shot")}</button></h2>
     <div class="meta"><span>Day ${s.day ?? "–"}</span>${s.location ? `<span>${esc(s.location)}</span>` : ""}<span>${state.takes.length} takes logged</span><span>Camera ${esc(s.camera_default) || "—"}</span></div>
     <p class="desc">${esc(s.description) || ""}</p>`;
   $("take-no").textContent = pad(state.takeNo);
   $("btn-edit-scene").onclick = () => openEditScene(s);
+  $("btn-status").onclick = () => cycleStatus(s);
   renderProjectHeader();
+}
+
+const nextStatus = (s) => (s === "Not shot" ? "Partial" : s === "Partial" ? "Complete" : "Not shot");
+
+async function cycleStatus(s) {
+  const payload = {
+    number: s.number, title: s.title, int_ext: s.int_ext, daypart: s.daypart,
+    day: s.day ?? 1, location: s.location || "", status: nextStatus(s.status || "Not shot"),
+    description: s.description, camera_default: s.camera_default,
+  };
+  try { await invoke("update_scene", { id: s.id, scene: payload }); }
+  catch (e) { toast("Save failed: " + e); return; }
+  s.status = payload.status;
+  sndClick();
+  renderScenes(); renderHead();
 }
 
 function renderTakes() {
@@ -370,7 +431,7 @@ function renderTakes() {
   rows.forEach((t) => {
     const tr = document.createElement("tr");
     const dot = t.rating === "Good" ? "●" : t.rating === "Maybe" ? "◐" : "○";
-    tr.innerHTML = `<td><b>${esc(t.scene_number)}</b> <span class="dim">${esc(t.scene_title) || ""}</span></td><td>${t.day ?? ""}</td><td>${pad(t.take_no)}</td><td>${esc(t.tc_in)}</td><td>${esc(t.cam)}</td><td>${esc(t.int_ext)}</td><td>${esc(t.lens)}</td><td class="mono">${esc(t.cam_file) || ""}</td><td class="mono">${esc(t.audio_file) || ""}</td>
+    tr.innerHTML = `<td><b>${esc(t.scene_number)}</b> <span class="dim">${esc(t.scene_title) || ""}</span></td><td>${esc(t.setup_name) || ""}</td><td>${t.day ?? ""}</td><td>${pad(t.take_no)}</td><td>${esc(t.tc_in)}</td><td>${esc(t.cam)}</td><td>${esc(t.int_ext)}</td><td>${esc(t.lens)}</td><td class="mono">${esc(t.cam_file) || ""}</td><td class="mono">${esc(t.audio_file) || ""}</td>
       <td><span class="pill ${t.rating}">${dot} ${esc(t.rating)}</span></td><td>${esc(t.tags) || ""}</td><td>${esc(t.note) || ""}</td>
       <td class="rowbtns"><button class="mini-btn" data-act="edit" title="Edit take">✎</button><button class="del" title="Delete take">×</button></td>`;
     tr.querySelector('[data-act="edit"]').onclick = () => openEditTake(t);
@@ -393,6 +454,35 @@ function openEditTake(t) {
   $("e-intext").value = t.int_ext || "INT"; $("e-day").value = t.day ?? 1;
   $("e-camfile").value = t.cam_file || ""; $("e-audiofile").value = t.audio_file || "";
   $("e-tags").value = t.tags || ""; $("e-note").value = t.note || "";
+  const sel = $("e-setup"); sel.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = ""; none.textContent = "— Whole scene —";
+  sel.appendChild(none);
+  state.setups
+    .filter((u) => u.scene_id === t.scene_id)
+    .forEach((u) => {
+      const o = document.createElement("option");
+      o.value = u.id; o.textContent = u.name;
+      if (t.setup_id === u.id) o.selected = true;
+      sel.appendChild(o);
+    });
+  // setups may have changed since the scene was opened — refresh quietly
+  invoke("list_setups", { sceneId: t.scene_id }).then((fresh) => {
+    if (!Array.isArray(fresh)) return;
+    state.setups = state.setups.filter((u) => u.scene_id !== t.scene_id).concat(fresh);
+    const cur = sel.value;
+    sel.innerHTML = "";
+    const n0 = document.createElement("option");
+    n0.value = ""; n0.textContent = "— Whole scene —";
+    sel.appendChild(n0);
+    fresh.forEach((u) => {
+      const o = document.createElement("option");
+      o.value = u.id; o.textContent = u.name;
+      sel.appendChild(o);
+    });
+    sel.value = cur || (t.setup_id != null ? String(t.setup_id) : "");
+  }).catch(() => {});
+  sel.value = t.setup_id != null ? String(t.setup_id) : "";
   $("modal-take").classList.remove("hidden");
 }
 
@@ -404,6 +494,7 @@ async function saveEditTake() {
     tc_in: $("e-tc").value.trim(), cam: $("e-cam").value.trim(),
     lens: $("e-lens").value.trim(), rating: $("e-rating").value,
     int_ext: $("e-intext").value, day: parseInt($("e-day").value) || 1,
+    setup_id: $("e-setup").value === "" ? null : parseInt($("e-setup").value),
     cam_file: $("e-camfile").value.trim(), audio_file: $("e-audiofile").value.trim(),
     tags: $("e-tags").value.trim(), note: $("e-note").value,
   };
@@ -414,6 +505,51 @@ async function saveEditTake() {
   if (editedSceneId === state.activeId) await loadTakes();
   await loadAllTakes(); renderScenes(); renderHead(); refreshStats();
   toast("Take updated");
+}
+
+function renderSetupChips() {
+  const c = $("setup-chips"); c.innerHTML = "";
+  const mk = (id, label, count, on, title) => {
+    const s = document.createElement("span");
+    s.className = "setup-pick" + (on ? " on" : "");
+    const b = document.createElement("button");
+    b.style.cssText = "background:none;border:none;color:inherit;font:inherit;cursor:pointer;padding:0";
+    b.textContent = count != null ? `${label} · ${count}` : label;
+    b.title = title || label;
+    b.onclick = () => { state.takeSetupId = id; renderSetupChips(); sndClick(); };
+    s.appendChild(b);
+    return s;
+  };
+  c.appendChild(mk(null, "Whole scene", null, state.takeSetupId == null, "No specific setup"));
+  state.setups.forEach((u) => {
+    const s = mk(u.id, u.name, u.take_count, state.takeSetupId === u.id, `${u.name} — click × to delete setup`);
+    const x = document.createElement("button");
+    x.className = "x"; x.textContent = "×"; x.title = `Delete setup “${u.name}” (takes stay)`;
+    x.onclick = async (e) => {
+      e.stopPropagation();
+      if (!(await confirmAsync(`Delete setup “${u.name}”? Takes stay, they just lose the tag.`))) return;
+      try { await invoke("delete_setup", { id: u.id }); } catch (err) { toast("Delete failed: " + err); return; }
+      sndDelete();
+      if (state.takeSetupId === u.id) state.takeSetupId = null;
+      await loadTakes(); renderSetupChips(); await loadAllTakes(); renderScenes();
+    };
+    s.appendChild(x);
+    c.appendChild(s);
+  });
+}
+
+async function saveSetup() {
+  const sc = active(); if (!sc) return;
+  const name = $("setup-input").value.trim();
+  if (!name) { toast("Give the setup a name"); return; }
+  try {
+    const created = await invoke("create_setup", { sceneId: sc.id, name });
+    state.takeSetupId = created.id;
+  } catch (e) { toast("Save failed: " + e); return; }
+  $("setup-input").value = "";
+  $("modal-setup").classList.add("hidden");
+  sndClick();
+  await loadTakes(); renderSetupChips();
 }
 
 function renderChips() {  const c = $("chips"); c.innerHTML = "";
@@ -471,6 +607,7 @@ async function logTake() {
     lens: fmtLens(state.lens || "35"), rating: state.rating,
     int_ext: state.takeIntExt || sc.int_ext || "INT",
     day: sc.day ?? 1,
+    setup_id: state.takeSetupId,
     cam_file: $("take-camfile").value.trim(), audio_file: $("take-audiofile").value.trim(),
     tags: [...state.tags].join(", "), note: $("note").value || [...state.tags].join(", "),
   };
@@ -551,6 +688,36 @@ $("set-exp-good").onchange = (e) => { S.exportGood = e.target.checked; saveSetti
 $("set-exp-days").onchange = (e) => { S.exportDays = e.target.checked; saveSettings(); };
 $("btn-close-settings").onclick = () => $("modal-settings").classList.add("hidden");
 // ---------- wire ----------
+$("btn-report").onclick = openReport;
+$("btn-report-back").onclick = () => showView("app");
+$("report-day").onchange = renderReport;
+$("btn-print").onclick = () => window.print();
+$("btn-import").onclick = async () => {
+  if (!state.activeProjectId) { toast("Open a project first"); return; }
+  try {
+    const r = await invoke("import_scenes_csv", { projectId: state.activeProjectId });
+    if (r.cancelled) { toast("Import cancelled"); return; }
+    sndClick();
+    toast(`Imported ${r.imported} scenes${r.duplicates ? ` (${r.duplicates} duplicates skipped)` : ""}${r.skipped ? `, ${r.skipped} rows skipped` : ""}`);
+    await loadScenes();
+  } catch (e) { toast("Import failed: " + e); }
+};
+$("btn-template").onclick = async () => {
+  try {
+    const path = await invoke("write_template_csv");
+    sndClick();
+    toast(`Template saved → ${path}`);
+  } catch (e) { toast("Template failed: " + e); }
+};
+$("btn-add-setup").onclick = () => {
+  if (!active()) { toast("Select a scene first"); return; }
+  $("setup-input").value = "";
+  $("modal-setup").classList.remove("hidden");
+  setTimeout(() => $("setup-input").focus(), 50);
+};
+$("btn-save-setup").onclick = saveSetup;
+$("btn-cancel-setup").onclick = () => $("modal-setup").classList.add("hidden");
+$("setup-input").onkeydown = (e) => { if (e.key === "Enter") saveSetup(); };
 // camera popup (rare change — kept out of the way on purpose)
 $("btn-cam").onclick = () => {
   $("cam-input").value = takeCam;
@@ -605,7 +772,7 @@ $("btn-cancel").onclick = () => $("modal").classList.add("hidden");
 $("btn-cancel-take").onclick = () => $("modal-take").classList.add("hidden");
 $("btn-save-take").onclick = saveEditTake;
 $("btn-create").onclick = async () => {
-  const s = { number: $("f-number").value.trim() || "1", title: $("f-title").value.trim(), int_ext: $("f-intext").value, daypart: $("f-daypart").value, description: $("f-desc").value, camera_default: $("f-camera").value.trim(), day: parseInt($("f-day").value) || 1, location: $("f-location").value.trim() };
+  const s = { number: $("f-number").value.trim() || "1", title: $("f-title").value.trim(), int_ext: $("f-intext").value, daypart: $("f-daypart").value, description: $("f-desc").value, camera_default: $("f-camera").value.trim(), day: parseInt($("f-day").value) || 1, location: $("f-location").value.trim(), status: $("f-status").value };
   try {
     if (state.editingSceneId) { await invoke("update_scene", { id: state.editingSceneId, scene: s }); state.activeId = state.editingSceneId; }
     else { const created = await invoke("create_scene", { projectId: state.activeProjectId, scene: s }); state.activeId = created.id; }
