@@ -1,6 +1,6 @@
 {
   "name": "slate-log",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Lightweight scene & take tracker for film shoots",
   "scripts": {
     "tauri": "tauri"

@@ -118,13 +118,25 @@ fn col_index(header: &[String], names: &[&str]) -> Option<usize> {
 }
 
 #[tauri::command]
-fn import_scenes_csv(app: AppHandle, project_id: i64) -> Result<serde_json::Value, String> {
-    use tauri_plugin_dialog::{DialogExt, FilePath};
-    let picked = app
-        .dialog()
-        .file()
-        .add_filter("CSV", &["csv"])
-        .blocking_pick_file();
+async fn import_scenes_csv(app: AppHandle, project_id: i64) -> Result<serde_json::Value, String> {
+    use tauri_plugin_dialog::FilePath;
+    // Never open a blocking dialog on the command thread itself: AppKit
+    // requires the dialog on the main thread, so hop via spawn_blocking.
+    // (The old blocking_pick_file call crashed the app here.)
+    let app2 = app.clone();
+    let picked: Option<FilePath> = tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let (tx, rx) = std::sync::mpsc::channel::<Option<FilePath>>();
+        app2.dialog()
+            .file()
+            .add_filter("CSV", &["csv"])
+            .pick_file(move |p| {
+                let _ = tx.send(p);
+            });
+        rx.recv().unwrap_or(None)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
     let path = match picked {
         Some(p) => p,
         None => return Ok(serde_json::json!({ "cancelled": true })),
