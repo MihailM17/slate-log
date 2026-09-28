@@ -739,8 +739,17 @@ pub fn import_photo(app: &AppHandle, scene_id: i64, setup_id: Option<i64>, src: 
             return Err(rusqlite::Error::InvalidParameterName("setup does not belong to this scene".into()));
         }
     }
-    // Decode once to validate + build a thumbnail; rejects HEIC/RAW etc.
-    let img = image::open(&src).map_err(|e| rusqlite::Error::InvalidParameterName(format!("not a readable image: {e}")))?;
+    // Decode from bytes (magic-number sniffing), never from the file
+    // extension — uploads arrive as .tmp and phones send all sorts of names.
+    let bytes = std::fs::read(&src).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+    let fmt = image::guess_format(&bytes).map_err(|_| {
+        rusqlite::Error::InvalidParameterName(
+            "photo must be a JPEG, PNG, WebP or GIF image (HEIC is not supported — set the camera to JPEG)".to_string(),
+        )
+    })?;
+    let img = image::load_from_memory_with_format(&bytes, fmt).map_err(|_| {
+        rusqlite::Error::InvalidParameterName("could not decode that photo — try JPEG".to_string())
+    })?;
     let ext = src
         .extension()
         .and_then(|e| e.to_str())

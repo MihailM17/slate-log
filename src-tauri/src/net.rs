@@ -160,6 +160,14 @@ fn now_tc() -> String {
     chrono::Local::now().format("%H:%M:%S").to_string()
 }
 
+// Phone screens show these raw — strip the rusqlite prefix.
+fn user_err(e: rusqlite::Error) -> String {
+    match e {
+        rusqlite::Error::InvalidParameterName(s) => s,
+        other => other.to_string(),
+    }
+}
+
 async fn snap_page(State(ctx): State<Ctx>, Query(q): Query<HashMap<String, String>>) -> impl IntoResponse {
     if !ctx.set.authed(&q) {
         return (StatusCode::FORBIDDEN, Html("<h1>Wrong or missing token — rescan the code in Slate Log.</h1>".to_string()));
@@ -256,7 +264,7 @@ async fn api_take(State(ctx): State<Ctx>, Query(q): Query<HashMap<String, String
     };
     match crate::db::insert_take(&ctx.app, take) {
         Ok(t) => (StatusCode::OK, Json(serde_json::json!({ "ok": true, "take_no": t.take_no }))),
-        Err(e) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": e.to_string() }))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": user_err(e) }))),
     }
 }
 
@@ -311,7 +319,7 @@ async fn api_photo(State(ctx): State<Ctx>, Query(q): Query<HashMap<String, Strin
             }
             (StatusCode::OK, Json(serde_json::json!({ "ok": true, "id": p.id })))
         }
-        Err(e) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": e.to_string() }))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": user_err(e) }))),
     }
 }
 
