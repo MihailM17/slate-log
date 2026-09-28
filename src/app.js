@@ -382,7 +382,7 @@ function renderScenes() {
       const act = e.target.dataset?.act;
       if (act === "del") { e.stopPropagation(); await deleteScene(s); return; }
       if (act === "edit") { e.stopPropagation(); openEditScene(s); return; }
-      state.activeId = s.id; await loadTakes(); renderScenes(); renderHead();
+      state.activeId = s.id; await loadTakes(); renderScenes(); renderHead(); pushSceneToServer();
     };
     list.appendChild(d);
   });
@@ -709,7 +709,7 @@ function renderProgress() {
       resetTimerUI();
       state.activeId = id;
       await loadTakes();
-      renderScenes(); renderHead();
+      renderScenes(); renderHead(); pushSceneToServer();
       showView("app");
     };
   });
@@ -816,6 +816,8 @@ function applySettingsToUI() {
   $("tc-now").style.display = S.manualTC ? "none" : "";
   renderChips();
 }
+$("btn-set").onclick = openSetMode;
+$("btn-close-set").onclick = () => closeSetMode();
 $("btn-settings").onclick = () => {
   $("set-sound").checked = S.sounds;
   $("set-confirm").checked = S.confirmDelete;
@@ -854,6 +856,52 @@ $("set-quick").onchange = (e) => {
 $("set-exp-good").onchange = (e) => { S.exportGood = e.target.checked; saveSettings(); };
 $("set-exp-days").onchange = (e) => { S.exportDays = e.target.checked; saveSettings(); };
 $("btn-close-settings").onclick = () => $("modal-settings").classList.add("hidden");
+// ---------- set mode (phone snap page over LAN) ----------
+let setPollH = null;
+
+async function openSetMode() {
+  if (!state.activeProjectId) { toast("Open a project first"); return; }
+  try {
+    const r = await invoke("set_start", { sceneId: state.activeId });
+    const svg = await invoke("set_qr");
+    $("set-qr").innerHTML = svg;
+    $("set-url").textContent = r.url;
+    $("modal-set").classList.remove("hidden");
+    refreshSetScene();
+    setPollH = setInterval(refreshSetScene, 2500);
+    try {
+      toast("Set mode on — macOS may ask to allow incoming connections: click Allow");
+    } catch { /* ignore */ }
+  } catch (e) { toast("Set mode failed: " + e); }
+}
+
+async function refreshSetScene() {
+  try {
+    const info = await invoke("set_info");
+    if (!info.running) { closeSetMode(true); return; }
+    $("set-scene").textContent = info.scene_number ? `Scene ${info.scene_number} ${info.scene_title || ""}` : "—";
+  } catch { /* server went away */ }
+}
+
+async function closeSetMode(silent) {
+  clearInterval(setPollH);
+  setPollH = null;
+  try { await invoke("set_stop"); } catch { /* ignore */ }
+  $("modal-set").classList.add("hidden");
+  if (!silent) sndClick();
+  // Phone may have pushed stills/takes while we were covered — refresh.
+  if (state.activeProjectId) {
+    await loadTakes();
+    renderScenes(); renderHead();
+    await loadAllTakes(); refreshStats();
+  }
+}
+
+async function pushSceneToServer() {
+  try { await invoke("set_scene", { sceneId: state.activeId }); } catch { /* server off */ }
+  if (!$("modal-set").classList.contains("hidden")) refreshSetScene();
+}
+
 // ---------- wire ----------
 $("btn-report").onclick = openReport;
 $("btn-report-back").onclick = () => showView("app");
@@ -998,7 +1046,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
     const i = state.scenes.findIndex((s) => s.id === state.activeId);
     const n = e.key === "ArrowDown" ? i + 1 : i - 1;
-    if (state.scenes[n]) { state.activeId = state.scenes[n].id; loadTakes().then(() => { renderScenes(); renderHead(); }); }
+    if (state.scenes[n]) { state.activeId = state.scenes[n].id; loadTakes().then(() => { renderScenes(); renderHead(); pushSceneToServer(); }); }
   }
 });
 

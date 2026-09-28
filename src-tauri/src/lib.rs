@@ -1,5 +1,6 @@
 pub mod db;
 pub mod export;
+pub mod net;
 
 use db::{NewProject, NewScene, NewTake, Project, Scene, Setup, Take, TakeWithScene, UpdateTake};
 use tauri::{AppHandle, Manager};
@@ -391,6 +392,7 @@ fn export_excel(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(net::SetMode::new())
         .setup(|app| {
             let handle = app.handle().clone();
             db::ensure_schema(&handle);
@@ -426,7 +428,12 @@ pub fn run() {
             update_take,
             delete_take,
             get_stats,
-            export_excel
+            export_excel,
+            net::set_start,
+            net::set_stop,
+            net::set_scene,
+            net::set_info,
+            net::set_qr,
         ])
         .run(tauri::generate_context!())
         .expect("error while running slate-log");

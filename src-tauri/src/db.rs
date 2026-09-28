@@ -559,6 +559,34 @@ pub fn fetch_scenes(app: &AppHandle, project_id: i64) -> rusqlite::Result<Vec<Sc
     rows.collect()
 }
 
+/// Single scene by id (used by set mode + dup helpers).
+pub fn fetch_scenes_for(app: &AppHandle, id: i64) -> Option<Scene> {
+    let conn = connect(app).ok()?;
+    conn.query_row(
+        "SELECT s.id, s.project_id, s.number, s.title, s.int_ext, s.daypart, s.day, s.location, s.status, s.description, s.camera_default,
+                (SELECT COUNT(*) FROM takes t WHERE t.scene_id = s.id)
+         FROM scenes s WHERE s.id=?1",
+        params![id],
+        |r| {
+            Ok(Scene {
+                id: r.get(0)?,
+                project_id: r.get(1)?,
+                number: r.get(2)?,
+                title: r.get(3)?,
+                int_ext: r.get(4)?,
+                daypart: r.get(5)?,
+                day: r.get(6)?,
+                location: r.get(7).unwrap_or_default(),
+                status: r.get(8).unwrap_or_else(|_| "Not shot".to_string()),
+                description: r.get(9)?,
+                camera_default: r.get(10)?,
+                take_count: r.get(11)?,
+            })
+        },
+    )
+    .ok()
+}
+
 fn scene_number_taken(conn: &Connection, project_id: i64, number: &str, except_id: Option<i64>) -> bool {
     conn.query_row(
         "SELECT COUNT(*) FROM scenes WHERE project_id=?1 AND number=?2 AND (?3 IS NULL OR id != ?3)",

@@ -49,6 +49,7 @@
       </div>
       <div class="top-actions">
         <button id="btn-settings" class="btn ghost" title="App settings">⚙</button>
+        <button id="btn-set" class="btn ghost" title="Set mode: phones on this WiFi push stills + takes live">📷 Set</button>
         <button id="btn-import" class="btn ghost" title="Import scenes from CSV">⤓ Import</button>
         <button id="btn-template" class="btn ghost" title="Save a blank CSV template to Documents">Template</button>
         <button id="btn-report" class="btn ghost" title="Daily report (print / PDF)">⎙ Report</button>
@@ -263,6 +264,19 @@
     <div class="modal-actions">
       <button id="btn-cancel-lens" class="btn ghost">Cancel</button>
       <button id="btn-save-lens" class="btn primary">Set lens</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-set" class="modal hidden">
+  <div class="modal-card">
+    <h2>📷 Set mode</h2>
+    <p class="tiny">Phones on this WiFi scan the code — stills and quick takes land here live. Server stops when you close this.</p>
+    <div id="set-qr" style="text-align:center"></div>
+    <p class="mono" id="set-url" style="word-break:break-all"></p>
+    <p>Phone is logging to: <b id="set-scene">—</b></p>
+    <div class="modal-actions">
+      <button id="btn-close-set" class="btn primary">Stop &amp; Close</button>
     </div>
   </div>
 </div>
