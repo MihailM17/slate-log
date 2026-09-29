@@ -78,7 +78,6 @@ input.invalid{border-color:#e0705c!important}
 .dim{color:var(--dim);font-weight:400}
 .iconbtn{display:inline-flex;align-items:center;gap:7px}
 .rowbtns{white-space:nowrap}
-.danger-zone{display:flex;justify-content:space-between;align-items:center;margin-top:12px;border-top:1px solid var(--line);padding-top:10px;white-space:normal}
 .timer-row{display:flex;align-items:center;gap:12px;margin-top:12px}
 .timer-row b{font-variant-numeric:tabular-nums;color:var(--mut)}
 .photos{margin:0 0 18px}

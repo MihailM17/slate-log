@@ -3841,6 +3841,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "csv",
+ "flate2",
  "image",
  "local-ip-address",
  "pdf-extract",

@@ -436,7 +436,6 @@ function openNewScene() {
   $("f-location").value = "";
   $("f-intext").value = S.defaultIntExt || "INT";
   $("f-day").value = active()?.day ?? activeProject()?.shoot_day ?? 1;
-  $("scene-danger").classList.add("hidden");
   $("modal").classList.remove("hidden");
 }
 
@@ -450,18 +449,7 @@ function openEditScene(s) {
   $("f-location").value = s.location || "";
   $("f-status").value = s.status || "Not shot";
   $("f-day").value = s.day ?? 1;
-  refreshSceneDanger(s.id);
   $("modal").classList.remove("hidden");
-}
-
-async function refreshSceneDanger(sceneId) {
-  let n = 0;
-  try {
-    const ups = await invoke("list_setups", { sceneId });
-    n = ups.length;
-  } catch { /* ignore */ }
-  $("scene-setup-count").textContent = n ? `${n} setups` : "No setups";
-  $("scene-danger").classList.toggle("hidden", !state.editingSceneId);
 }
 
 function renderHead() {
@@ -1280,23 +1268,6 @@ $("day-prev").onclick = () => stepDay(-1);
 $("day-next").onclick = () => stepDay(1);
 $("btn-new-scene").onclick = openNewScene;
 $("btn-cancel").onclick = () => $("modal").classList.add("hidden");
-$("btn-clear-setups").onclick = async () => {
-  const id = state.editingSceneId;
-  if (!id) return;
-  const n = parseInt(($("scene-setup-count").textContent.match(/\d+/) || [0])[0]);
-  if (!n) { toast("No setups to delete"); return; }
-  if (!(await confirmAsync(`Delete all ${n} setups in this scene? Takes stay, they just lose the tag.`))) return;
-  try {
-    const ups = await invoke("list_setups", { sceneId: id });
-    for (const u of ups) {
-      await invoke("delete_setup", { id: u.id });
-    }
-  } catch (e) { toast("Delete failed: " + e); return; }
-  sndDelete();
-  toast(`Deleted ${n} setups`);
-  refreshSceneDanger(id);
-  await loadTakes(); renderSetupChips(); renderScenes();
-};
 $("btn-cancel-take").onclick = () => $("modal-take").classList.add("hidden");
 $("btn-save-take").onclick = saveEditTake;
 $("btn-create").onclick = async () => {
