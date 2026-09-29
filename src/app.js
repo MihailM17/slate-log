@@ -33,7 +33,10 @@ async function refreshStats() {
 // (remappable shortcuts live in features/settings.js)
 const modalOpen = () => !!document.querySelector(".modal:not(.hidden)");
 
+// Order matters: the confirm dialog floats above other modals, so Enter
+// must hit it first (e.g. delete-setup confirm over the setup modal).
 const ENTER_SUBMIT = {
+  "modal-confirm": "btn-confirm-ok",
   "modal": "btn-create",
   "modal-take": "btn-save-take",
   "modal-project": "btn-save-project",
@@ -42,11 +45,10 @@ const ENTER_SUBMIT = {
   "modal-setup": "btn-save-setup",
   "modal-settings": "btn-close-settings",
   "modal-shortcuts": "btn-close-shortcuts",
-  "modal-confirm": "btn-confirm-ok",
   "modal-lightbox": "btn-lightbox-save",
 };
 
-function submitOpenModal() {
+export function submitOpenModal() {
   for (const [mid, bid] of Object.entries(ENTER_SUBMIT)) {
     const m = $(mid);
     if (m && !m.classList.contains("hidden")) {
@@ -77,14 +79,14 @@ function closeTopModal() {
 // progress in features/progress.js. Their buttons are wired in each
 // module's init function (see bottom of this file).
 
-document.addEventListener("keydown", (e) => {
+export function handleGlobalKey(e) {
   // Remap capture (features/settings.js) has first dibs on every key.
   if (handleCaptureKey(e)) return;
-  // Ctrl/Cmd+Z undoes the last scene or project deletion (works in inputs too,
-  // except while remapping — text undo still wins inside text fields).
+  // Ctrl/Cmd+Z undoes the last scene or project deletion — except inside
+  // editable fields, where text undo wins.
   if ((e.ctrlKey || e.metaKey) && e.code === "KeyZ" && !e.shiftKey) {
     const tag = (e.target.tagName || "").toLowerCase();
-    if (tag === "input" || tag === "textarea") return; // let text undo win
+    if (tag === "input" || tag === "textarea" || tag === "select") return;
     e.preventDefault();
     undoDelete();
     return;
@@ -112,7 +114,9 @@ document.addEventListener("keydown", (e) => {
     const n = e.code === (S.shortcuts.nextScene || "ArrowDown") ? i + 1 : i - 1;
     if (state.scenes[n]) { state.activeId = state.scenes[n].id; loadTakes().then(() => { renderScenes(); renderHead(); pushSceneToServer(); scrollActiveSceneIntoView(); }); }
   }
-});
+}
+
+document.addEventListener("keydown", handleGlobalKey);
 
 setInterval(() => { $("tc-now").textContent = nowTC(); }, 1000);
 $("tc-now").textContent = nowTC();
