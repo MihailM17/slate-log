@@ -26,7 +26,10 @@ fn daypart_of(time: &str) -> &'static str {
 /// Try one line. Returns None for anything that is not a slug.
 fn parse_line(line: &str) -> Option<(ParsedScene, Vec<String>)> {
     let mut warnings = Vec::new();
-    let t = line.trim();
+    // Normalize dashes first (1:1 char swap, indices stay valid): scripts
+    // use hyphens, en dashes and em dashes interchangeably as separators.
+    let norm: String = line.trim().replace('–', "-").replace('—', "-");
+    let t = norm.as_str();
     if t.is_empty() {
         return None;
     }
@@ -36,14 +39,31 @@ fn parse_line(line: &str) -> Option<(ParsedScene, Vec<String>)> {
         return None;
     }
     let up = t.to_uppercase();
-    // Optional leading production scene number: `14 INT. ...`
+    // Optional leading production scene number: `14`, `14.`, `1)`, `2A`.
     let mut rest = up.as_str();
     let mut number = String::new();
     if let Some(i) = rest.find(char::is_whitespace) {
         let (head, tail) = rest.split_at(i);
+        let head = head.trim_end_matches(['.', ')']);
         if !head.is_empty() && head.chars().all(|c| c.is_ascii_digit() || c == 'A') {
             number = head.to_string();
             rest = tail.trim_start();
+        }
+    }
+    // Transitions glued to the slug (`FADE IN: INT. ...`).
+    for prefix in [
+        "FADE IN:",
+        "FADE OUT:",
+        "CUT TO:",
+        "DISSOLVE TO:",
+        "SMASH CUT TO:",
+        "MATCH CUT TO:",
+        "CUT TO BLACK:",
+        "FADE TO BLACK:",
+    ] {
+        if let Some(r) = rest.strip_prefix(prefix) {
+            rest = r.trim_start();
+            break;
         }
     }
     // Marker with a hard boundary so INTENTION / INTERIOR can't match.
@@ -146,5 +166,21 @@ mod tests {
     fn rejects_prose() {
         let (scenes, _) = parse_screenplay("The interior of the station.\nAn EXTREMELY loud noise.\ninterior monologue\n");
         assert!(scenes.is_empty());
+    }
+
+    #[test]
+    fn transitions_numbers_dashes() {
+        // Real-world slug: dotted number, glued transition, en dash.
+        let (scenes, _) = parse_screenplay(
+            "1.  FADE IN: INT. ЧАСОВНИКАРСКА РАБОТИЛНИЦА – AFTERNOON\nFADE OUT: КРАЙ\n2) EXT. RIVER - NIGHT\n",
+        );
+        assert_eq!(scenes.len(), 2);
+        assert_eq!(scenes[0].number, "1");
+        assert_eq!(scenes[0].int_ext, "INT");
+        assert_eq!(scenes[0].location, "ЧАСОВНИКАРСКА РАБОТИЛНИЦА");
+        assert_eq!(scenes[0].daypart, "Day");
+        assert_eq!(scenes[1].number, "2");
+        assert_eq!(scenes[1].int_ext, "EXT");
+        assert_eq!(scenes[1].daypart, "Night");
     }
 }
