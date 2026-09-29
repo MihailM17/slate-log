@@ -104,7 +104,7 @@ export async function deleteScene(s) {
   toast("Scene deleted — Ctrl+Z to undo");
 }
 
-function openNewScene() {
+export function openNewScene() {
   if (!state.activeProjectId) { toast("Create a project first"); return; }
   state.editingSceneId = null;
   $("modal-title").textContent = "New scene";

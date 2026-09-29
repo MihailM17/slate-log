@@ -8,7 +8,7 @@ import {
   initTakes, loadTakes, logTake, renderChips, syncLensSeg,
 } from "./features/takes.js";
 import {
-  loadScenes, renderScenes, renderHead, openNewScene, scrollActiveSceneIntoView,
+  initScenes, loadScenes, renderScenes, renderHead, openNewScene, scrollActiveSceneIntoView,
 } from "./features/scenes.js";
 import { initPhotos, loadPhotos } from "./features/photos.js";
 import { initProjects, loadProjects, undoDelete } from "./features/projects.js";
