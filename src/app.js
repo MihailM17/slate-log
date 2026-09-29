@@ -5,20 +5,39 @@ const invoke = async (cmd, args = {}) => {
 };
 
 const DEFAULT_QUICK = ["Clean take", "Boom in frame", "Focus soft", "Camera noise", "Actor flub", "Continuity break"];
+const DEFAULT_SHORTCUTS = { logTake: "Space", rateGood: "KeyG", rateMaybe: "KeyM", rateBad: "KeyB", nextScene: "ArrowDown", prevScene: "ArrowUp", newScene: "KeyN" };
+const SHORTCUT_DEFS = [
+  { key: "logTake", label: "Log take" },
+  { key: "rateGood", label: "Rate Good" },
+  { key: "rateMaybe", label: "Rate Maybe" },
+  { key: "rateBad", label: "Rate Bad" },
+  { key: "nextScene", label: "Next scene" },
+  { key: "prevScene", label: "Previous scene" },
+  { key: "newScene", label: "New scene" },
+];
+const keyName = (code) => {
+  const m = { Space: "Space", Escape: "Esc", Enter: "Enter", ArrowDown: "↓", ArrowUp: "↑", ArrowLeft: "←", ArrowRight: "→", Tab: "Tab" };
+  if (m[code]) return m[code];
+  if (code.startsWith("Key")) return code.slice(3);
+  if (code.startsWith("Digit")) return code.slice(5);
+  return code;
+};
 const DEFAULT_SETTINGS = {
   sounds: true, confirmDelete: true, manualTC: false,
   defaultRating: "Good", defaultLens: "35", defaultIntExt: "INT", defaultCam: "",
   quickNotes: [...DEFAULT_QUICK], exportGood: true, exportDays: true,
   autoBump: true, setPort: 17831, checkStartup: true,
+  shortcuts: { ...DEFAULT_SHORTCUTS },
 };
 function loadSettings() {
+  let s;
   try {
     const raw = JSON.parse(localStorage.getItem("slate-settings") || "null");
-    if (raw && typeof raw === "object") return { ...DEFAULT_SETTINGS, ...raw };
-  } catch { /* fall through to legacy keys */ }
-  const s = { ...DEFAULT_SETTINGS };
+    s = raw && typeof raw === "object" ? { ...DEFAULT_SETTINGS, ...raw } : { ...DEFAULT_SETTINGS };
+  } catch { /* fall through to legacy keys */ s = { ...DEFAULT_SETTINGS }; }
   if (localStorage.getItem("slate-sound") === "off") s.sounds = false;
   if (localStorage.getItem("slate-confirm") === "off") s.confirmDelete = false;
+  s.shortcuts = { ...DEFAULT_SHORTCUTS, ...(s.shortcuts || {}) };
   return s;
 }
 const S = loadSettings();
@@ -817,7 +836,72 @@ async function exportExcel(projectId) {
   } catch (e) { toast("Export failed: " + e); }
 }
 
-// ---------- settings ----------
+// ---------- keyboard shortcuts (remappable) ----------
+let capturing = null;
+
+function renderShortcutRows() {
+  const w = $("shortcut-rows"); w.innerHTML = "";
+  SHORTCUT_DEFS.forEach((d) => {
+    const row = document.createElement("div");
+    row.className = "sc-row";
+    const lab = document.createElement("span");
+    lab.textContent = d.label;
+    const b = document.createElement("button");
+    b.className = "btn ghost sc-key";
+    b.textContent = keyName(S.shortcuts[d.key] || DEFAULT_SHORTCUTS[d.key]);
+    b.onclick = () => { capturing = d.key; b.textContent = "press keys…"; };
+    row.appendChild(lab); row.appendChild(b);
+    w.appendChild(row);
+  });
+}
+
+function renderKeysHint() {
+  const k = (a) => keyName(S.shortcuts[a] || DEFAULT_SHORTCUTS[a]);
+  const el = $("keys-hint");
+  if (el) el.textContent = `${k("logTake")} log · ${k("rateGood")} good · ${k("rateMaybe")} maybe · ${k("rateBad")} bad · ${k("prevScene")}/${k("nextScene")} scene`;
+}
+
+// ---------- modal keyboard system: Enter submits, Esc closes ----------
+const modalOpen = () => !!document.querySelector(".modal:not(.hidden)");
+
+const ENTER_SUBMIT = {
+  "modal": "btn-create",
+  "modal-take": "btn-save-take",
+  "modal-project": "btn-save-project",
+  "modal-cam": "btn-save-cam",
+  "modal-lens": "btn-save-lens",
+  "modal-setup": "btn-save-setup",
+  "modal-settings": "btn-close-settings",
+  "modal-confirm": "btn-confirm-ok",
+  "modal-lightbox": "btn-lightbox-save",
+};
+
+function submitOpenModal() {
+  for (const [mid, bid] of Object.entries(ENTER_SUBMIT)) {
+    const m = $(mid);
+    if (m && !m.classList.contains("hidden")) {
+      const b = $(bid);
+      if (b) b.click();
+      return true;
+    }
+  }
+  return false;
+}
+
+function closeTopModal() {
+  // Topmost first: confirm floats above everything (z-index).
+  for (const mid of ["modal-confirm", "modal-lightbox", "modal-setup", "modal-lens", "modal-cam", "modal-take", "modal", "modal-project", "modal-settings", "modal-set"]) {
+    const m = $(mid);
+    if (m && !m.classList.contains("hidden")) {
+      if (mid === "modal-confirm") { $("btn-confirm-cancel").click(); }
+      else if (mid === "modal-set") { closeSetMode(); }
+      else if (mid === "modal-lens") { $("btn-cancel-lens").click(); }
+      else { m.classList.add("hidden"); }
+      return true;
+    }
+  }
+  return false;
+}
 function applySettingsToUI() {
   state.rating = S.defaultRating;
   state.lens = S.defaultLens;
@@ -827,6 +911,7 @@ function applySettingsToUI() {
   $("take-tc").classList.toggle("hidden", !S.manualTC);
   $("tc-now").style.display = S.manualTC ? "none" : "";
   renderChips();
+  renderKeysHint();
 }
 // (btn-set lives in the stills header and is wired in renderPhotos)
 $("btn-close-set").onclick = () => closeSetMode();
@@ -845,6 +930,7 @@ $("btn-settings").onclick = () => {
   $("set-port").value = S.setPort;
   $("set-check-startup").checked = S.checkStartup;
   $("update-status").textContent = "";
+  renderShortcutRows();
   $("modal-settings").classList.remove("hidden");
 };
 $("set-sound").onchange = (e) => {
@@ -908,10 +994,15 @@ async function checkForUpdates(manual) {
 }
 $("btn-check-updates").onclick = () => checkForUpdates(true);
 $("btn-defaults").onclick = () => {
-  Object.assign(S, { ...DEFAULT_SETTINGS, quickNotes: [...DEFAULT_QUICK] });
-  saveSettings(); applySettingsToUI();
+  Object.assign(S, { ...DEFAULT_SETTINGS, quickNotes: [...DEFAULT_QUICK], shortcuts: { ...DEFAULT_SHORTCUTS } });
+  saveSettings(); applySettingsToUI(); renderKeysHint();
   $("btn-settings").click(); // re-open to refresh all controls
   toast("Settings restored to defaults");
+};
+$("btn-shortcut-reset").onclick = () => {
+  S.shortcuts = { ...DEFAULT_SHORTCUTS };
+  saveSettings(); renderShortcutRows(); renderKeysHint(); sndClick();
+  toast("Shortcuts reset");
 };
 $("btn-close-settings").onclick = () => $("modal-settings").classList.add("hidden");
 // ---------- set mode (phone snap page over LAN) ----------
@@ -990,7 +1081,6 @@ $("btn-add-setup").onclick = () => {
 };
 $("btn-save-setup").onclick = saveSetup;
 $("btn-cancel-setup").onclick = () => $("modal-setup").classList.add("hidden");
-$("setup-input").onkeydown = (e) => { if (e.key === "Enter") saveSetup(); };
 // camera popup (rare change - kept out of the way on purpose)
 function openCamPopup() {
   $("cam-input").value = takeCam;
@@ -1007,7 +1097,6 @@ const saveCam = () => {
 $("btn-save-cam").onclick = saveCam;
 $("btn-cam").onclick = openCamPopup;
 $("btn-cancel-cam").onclick = () => $("modal-cam").classList.add("hidden");
-$("cam-input").onkeydown = (e) => { if (e.key === "Enter") saveCam(); };
 seg("seg-rating", (v) => (state.rating = v));
 seg("seg-take-intext", (v) => (state.takeIntExt = v));
 // lens presets + custom popup (presets untouched)
@@ -1031,7 +1120,6 @@ const saveLens = () => {
 };
 $("btn-save-lens").onclick = saveLens;
 $("btn-cancel-lens").onclick = () => { $("modal-lens").classList.add("hidden"); syncLensSeg(); };
-$("lens-input").onkeydown = (e) => { if (e.key === "Enter") saveLens(); };
 $("btn-log").onclick = logTake;
 $("btn-timer").onclick = toggleTimer;
 $("btn-progress").onclick = openProgress;
@@ -1097,14 +1185,44 @@ $("btn-cancel-project").onclick = () => $("modal-project").classList.add("hidden
 $("btn-save-project").onclick = saveProject;
 
 document.addEventListener("keydown", (e) => {
+  // Remap capture has first dibs on every key.
+  if (capturing) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.code !== "Escape") {
+      const clash = SHORTCUT_DEFS.find((d) => d.key !== capturing && (S.shortcuts[d.key] || DEFAULT_SHORTCUTS[d.key]) === e.code);
+      if (clash) {
+        toast(`Already used by ${clash.label}`);
+      } else {
+        S.shortcuts[capturing] = e.code;
+        saveSettings(); renderKeysHint(); sndClick();
+      }
+    }
+    capturing = null;
+    renderShortcutRows();
+    return;
+  }
+  if (e.key === "Escape") {
+    if (closeTopModal()) { e.preventDefault(); }
+    return;
+  }
+  // Enter submits whichever modal is open (but never inside a textarea).
+  if (e.key === "Enter" && e.target.matches("input,select") && modalOpen()) {
+    e.preventDefault();
+    submitOpenModal();
+    return;
+  }
   if (e.target.matches("input,textarea,select")) return;
-  if (e.code === "Space") { e.preventDefault(); logTake(); }
-  if (e.key === "g" || e.key === "G") document.querySelector('#seg-rating [data-v="Good"]').click();
-  if (e.key === "m" || e.key === "M") document.querySelector('#seg-rating [data-v="Maybe"]').click();
-  if (e.key === "b" || e.key === "B") document.querySelector('#seg-rating [data-v="Bad"]').click();
-  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+  if (modalOpen()) return; // action shortcuts stay out while a popup is up
+  const eq = (a) => e.code === (S.shortcuts[a] || DEFAULT_SHORTCUTS[a]);
+  if (eq("logTake")) { if (e.code === "Space") e.preventDefault(); logTake(); }
+  else if (eq("rateGood")) document.querySelector('#seg-rating [data-v="Good"]').click();
+  else if (eq("rateMaybe")) document.querySelector('#seg-rating [data-v="Maybe"]').click();
+  else if (eq("rateBad")) document.querySelector('#seg-rating [data-v="Bad"]').click();
+  else if (eq("newScene")) openNewScene();
+  else if (e.code === (S.shortcuts.nextScene || "ArrowDown") || e.code === (S.shortcuts.prevScene || "ArrowUp")) {
     const i = state.scenes.findIndex((s) => s.id === state.activeId);
-    const n = e.key === "ArrowDown" ? i + 1 : i - 1;
+    const n = e.code === (S.shortcuts.nextScene || "ArrowDown") ? i + 1 : i - 1;
     if (state.scenes[n]) { state.activeId = state.scenes[n].id; loadTakes().then(() => { renderScenes(); renderHead(); pushSceneToServer(); }); }
   }
 });

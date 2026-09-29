@@ -164,6 +164,8 @@ h1{font:600 22px 'Barlow Condensed',sans-serif;letter-spacing:.02em;margin:0}
 .tiny{color:var(--dim);font-size:12px}
 .check{display:flex!important;flex-direction:row!important;align-items:center;gap:10px;font-size:14px!important;color:var(--txt)!important;cursor:pointer}
 .check input{width:auto!important;margin-top:0!important;accent-color:var(--rust)}
+.sc-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:5px 0;color:var(--txt);font-size:13.5px}
+.sc-key{min-width:110px}
 .tc-input{width:86px;background:#141312;border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:3px 8px;font-variant-numeric:tabular-nums;margin-left:6px}
 .set-sec{color:var(--dim);font-size:11px;letter-spacing:.08em;text-transform:uppercase;margin:14px 0 6px}
 .mut{color:var(--mut)}
