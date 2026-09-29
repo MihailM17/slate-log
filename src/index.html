@@ -196,6 +196,10 @@
     <label>Location<input id="f-location" placeholder="Lift station, Vitosha"></label>
     <label>Camera<input id="f-camera" placeholder="A · Sony FX6"></label>
     <label>Description<textarea id="f-desc" rows="2"></textarea></label>
+    <div class="rowbtns danger-zone hidden" id="scene-danger">
+      <span class="dim" id="scene-setup-count"></span>
+      <button id="btn-clear-setups" class="btn ghost" style="color:#e0705c" title="Delete every setup in this scene. Takes stay.">Delete all setups</button>
+    </div>
     <div class="modal-actions">
       <button id="btn-cancel" class="btn ghost">Cancel</button>
       <button id="btn-create" class="btn primary">Create scene</button>

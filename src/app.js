@@ -436,6 +436,7 @@ function openNewScene() {
   $("f-location").value = "";
   $("f-intext").value = S.defaultIntExt || "INT";
   $("f-day").value = active()?.day ?? activeProject()?.shoot_day ?? 1;
+  $("scene-danger").classList.add("hidden");
   $("modal").classList.remove("hidden");
 }
 
@@ -449,7 +450,18 @@ function openEditScene(s) {
   $("f-location").value = s.location || "";
   $("f-status").value = s.status || "Not shot";
   $("f-day").value = s.day ?? 1;
+  refreshSceneDanger(s.id);
   $("modal").classList.remove("hidden");
+}
+
+async function refreshSceneDanger(sceneId) {
+  let n = 0;
+  try {
+    const ups = await invoke("list_setups", { sceneId });
+    n = ups.length;
+  } catch { /* ignore */ }
+  $("scene-setup-count").textContent = n ? `${n} setups` : "No setups";
+  $("scene-danger").classList.toggle("hidden", !state.editingSceneId);
 }
 
 function renderHead() {
@@ -1083,7 +1095,7 @@ function fillScriptReview(scenes, warnings) {
   parsedScript = scenes;
   if (!parsedScript.length) { toast("No scenes found"); return; }
   const nset = parsedScript.reduce((a, s) => a + (s.setups || []).length, 0);
-  $("script-sub").textContent = `${parsedScript.length} scenes, ${nset} setups found - uncheck or fix anything odd, then import (day defaults to 1)`;
+  $("script-sub").textContent = `${parsedScript.length} scenes, ${nset} shot lines found - tick scenes to import; tick setups only for shots you want as setups (day defaults to 1)`;
   $("script-warn").textContent = (warnings || []).join(" · ");
   $("script-notice").textContent = "";
   renderScriptReview();
@@ -1103,9 +1115,11 @@ function renderScriptReview() {
   const tb = $("script-body"); tb.innerHTML = "";
   parsedScript.forEach((s, i) => {
     const tr = document.createElement("tr");
-    const setupTip = (s.setups || []).join("\n");
-    const setupShort = (s.setups || []).length
-      ? `${(s.setups || []).length} (${(s.setups || []).slice(0, 2).join(", ")}${(s.setups || []).length > 2 ? ", …" : ""})`
+    const names = s.setups || [];
+    const setupTip = names.join("\n");
+    const autoTick = names.length > 0 && names.length <= 8;
+    const setupShort = names.length
+      ? `${names.length} (${names.slice(0, 2).join(", ")}${names.length > 2 ? ", …" : ""})`
       : "—";
     tr.innerHTML = `<td><input type="checkbox" data-i="${i}" checked></td>
       <td><input data-f="number" data-i="${i}" value="${esc(s.number)}"></td>
@@ -1113,7 +1127,7 @@ function renderScriptReview() {
       <td><select data-f="int_ext" data-i="${i}"><option${s.int_ext === "INT" ? " selected" : ""}>INT</option><option${s.int_ext === "EXT" ? " selected" : ""}>EXT</option></select></td>
       <td><select data-f="daypart" data-i="${i}">${["Day", "Dusk", "Night", "Dawn"].map((d) => `<option${s.daypart === d ? " selected" : ""}>${d}</option>`).join("")}</select></td>
       <td><input data-f="location" data-i="${i}" value="${esc(s.location)}"></td>
-      <td title="${esc(setupTip)}">${esc(setupShort)}</td>`;
+      <td title="${esc(setupTip)}"><label class="check" style="margin:0"><input type="checkbox" data-setup-for="${i}"${autoTick ? " checked" : ""}> ${esc(setupShort)}</label></td>`;
     tb.appendChild(tr);
   });
 }
@@ -1121,11 +1135,12 @@ function renderScriptReview() {
 async function importReviewedScript() {
   const rows = [...document.querySelectorAll("#script-body tr")].map((tr, i) => {
     const get = (f) => tr.querySelector(`[data-f="${f}"]`).value;
+    const wantSetups = tr.querySelector(`[data-setup-for="${i}"]`)?.checked;
     return {
       checked: tr.querySelector("input[type=checkbox]").checked,
       number: get("number"), title: get("title"), int_ext: get("int_ext"),
       daypart: get("daypart"), location: get("location"),
-      setups: parsedScript[i]?.setups || [],
+      setups: wantSetups ? (parsedScript[i]?.setups || []) : [],
     };
   }).filter((r) => r.checked);
   if (!rows.length) { toast("Nothing checked"); return; }
@@ -1265,6 +1280,23 @@ $("day-prev").onclick = () => stepDay(-1);
 $("day-next").onclick = () => stepDay(1);
 $("btn-new-scene").onclick = openNewScene;
 $("btn-cancel").onclick = () => $("modal").classList.add("hidden");
+$("btn-clear-setups").onclick = async () => {
+  const id = state.editingSceneId;
+  if (!id) return;
+  const n = parseInt(($("scene-setup-count").textContent.match(/\d+/) || [0])[0]);
+  if (!n) { toast("No setups to delete"); return; }
+  if (!(await confirmAsync(`Delete all ${n} setups in this scene? Takes stay, they just lose the tag.`))) return;
+  try {
+    const ups = await invoke("list_setups", { sceneId: id });
+    for (const u of ups) {
+      await invoke("delete_setup", { id: u.id });
+    }
+  } catch (e) { toast("Delete failed: " + e); return; }
+  sndDelete();
+  toast(`Deleted ${n} setups`);
+  refreshSceneDanger(id);
+  await loadTakes(); renderSetupChips(); renderScenes();
+};
 $("btn-cancel-take").onclick = () => $("modal-take").classList.add("hidden");
 $("btn-save-take").onclick = saveEditTake;
 $("btn-create").onclick = async () => {
