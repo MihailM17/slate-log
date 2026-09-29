@@ -371,6 +371,7 @@ select,input,textarea{width:100%;background:#141312;border:1px solid #2c2a26;col
 .seg button:first-child{border-radius:8px 0 0 8px}.seg button:last-child{border-radius:0 8px 8px 0}
 .seg button.on{background:#b44332;border-color:#b44332;color:#fff}
 #shutter{display:block;width:100%;padding:22px;font-size:22px;font-weight:800;color:#fff;background:#b44332;border:none;border-radius:14px;margin:6px 0}
+#shutter svg{vertical-align:-5px;margin-right:10px}
 #preview{width:100%;border-radius:10px;display:none;margin-top:8px}
 .btn{display:block;width:100%;padding:14px;margin-top:10px;font-size:16px;font-weight:700;border-radius:10px;border:1px solid #2c2a26;background:#211f1c;color:#ece7df}
 .btn.primary{background:#b44332;border-color:#b44332}
@@ -379,12 +380,12 @@ select,input,textarea{width:100%;background:#141312;border:1px solid #2c2a26;col
 </style>
 </head>
 <body>
-<h1>📷 Set snap</h1>
+<h1>Set snap</h1>
 <div class="sub" id="film">connecting…</div>
 <div class="card">
 <label>Scene</label><select id="scene"></select>
 <label>Setup</label><select id="setup"></select>
-<button id="shutter">📷 SNAP</button>
+<button id="shutter"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>SNAP</button>
 <input type="file" id="file" accept="image/*" capture="environment" style="display:none">
 <img id="preview" alt="">
 <label>Caption</label><input id="caption" placeholder="e.g. Hat on left chair" autocomplete="off">
@@ -428,7 +429,7 @@ $("logtake").onclick=async()=>{
   const su=$("setup").value;
   try{const r=await fetch("api/take?token="+encodeURIComponent(TOKEN),{method:"POST",headers:{"Content-Type":"application/json"},
   body:JSON.stringify({rating,note:$("note").value,cam:$("cam").value,lens:$("lens").value,setup_id:su===""?null:parseInt(su)})});
-  const j=await r.json();if(j.ok){say("Take "+String(j.take_no).padStart(2,"0")+" logged ✓");$("note").value="";}else say(j.error||"failed",false);}catch(e){say("network error",false);}
+  const j=await r.json();if(j.ok){say("Take "+String(j.take_no).padStart(2,"0")+" logged ✓");$("note").value="";$("file").value="";$("preview").style.display="none";$("caption").value="";}else say(j.error||"failed",false);}catch(e){say("network error",false);}
 };
 ctx();
 </script>

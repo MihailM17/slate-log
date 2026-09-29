@@ -608,8 +608,16 @@ function renderPhotos() {
     const cell = document.createElement("div");
     cell.className = "photo-cell";
     cell.title = "Open still";
-    cell.innerHTML = `<img alt="Continuity still"><div class="cap">${esc(p.caption) || esc(p.setup_name) || "—"}</div>`;
+    cell.innerHTML = `<img alt="Continuity still"><button class="px" title="Delete this still">×</button><div class="cap">${esc(p.caption) || esc(p.setup_name) || "—"}</div>`;
     cell.querySelector("img").onclick = () => openLightbox(p.id);
+    cell.querySelector(".px").onclick = async (e) => {
+      e.stopPropagation();
+      if (!(await confirmAsync("Delete this still?"))) return;
+      try { await invoke("delete_photo", { id: p.id }); } catch (err) { toast("Delete failed: " + err); return; }
+      sndDelete();
+      if (state.lightboxId === p.id) { state.lightboxId = null; $("modal-lightbox").classList.add("hidden"); }
+      await loadPhotos();
+    };
     invoke("photo_data", { id: p.id, thumb: true })
       .then((src) => { const im = cell.querySelector("img"); if (im) im.src = src; })
       .catch(() => {});
