@@ -546,7 +546,7 @@ function openEditTake(t) {
 async function saveEditTake() {
   if (!state.editingTakeId) return;
   const editedSceneId = state.allTakes.find((t) => t.id === state.editingTakeId)?.scene_id;
-  if (!validTC($("e-tc").value)) { toast("Timecode must look like HH:MM:SS"); $("e-tc").focus(); return; }
+  if (!liveTC($("e-tc"))) { toast("Timecode must look like HH:MM:SS"); $("e-tc").focus(); return; }
   const payload = {
     tc_in: $("e-tc").value.trim(), cam: $("e-cam").value.trim(),
     lens: $("e-lens").value.trim(), rating: $("e-rating").value,
@@ -781,6 +781,11 @@ function syncLensSeg() {
 }
 const fmtLens = (v) => (/mm\s*$/i.test(v.trim()) ? v.trim() : v.trim() + "mm");
 const validTC = (v) => /^\d{1,2}:\d{2}:\d{2}$/.test(v.trim());
+const liveTC = (el) => {
+  const bad = el.value.trim() !== "" && !validTC(el.value);
+  el.classList.toggle("invalid", bad);
+  return !bad;
+};
 // Bump trailing run of digits, keeping padding and extension: C0004.MP4 -> C0005.MP4
 const bumpName = (v) => {
   const m = String(v || "").match(/^(.*?)(\d+)(\.[A-Za-z0-9]+)?$/);
@@ -793,7 +798,7 @@ const bumpName = (v) => {
 async function logTake() {
   const sc = active(); if (!sc) { toast("Create a scene first"); return; }
   const tc = S.manualTC ? $("take-tc").value.trim() : nowTC();
-  if (S.manualTC && !validTC(tc)) { toast("Timecode must look like HH:MM:SS"); $("take-tc").focus(); return; }
+  if (S.manualTC && !liveTC($("take-tc"))) { toast("Timecode must look like HH:MM:SS"); $("take-tc").focus(); return; }
   const dur = timing ? (performance.now() - timing) / 1000 : (state.lastDuration || 0);
   const payload = {
     scene_id: sc.id,
@@ -1160,6 +1165,8 @@ $("btn-lightbox-del").onclick = async () => {
   await loadPhotos();
 };
 $("btn-export").onclick = () => exportExcel();
+$("take-tc").oninput = (e) => liveTC(e.target);
+$("e-tc").oninput = (e) => liveTC(e.target);
 $("filter").oninput = (e) => { state.filter = e.target.value; renderScenes(); };
 $("btn-home").onclick = goHome;
 $("btn-home-new").onclick = openNewProject;
