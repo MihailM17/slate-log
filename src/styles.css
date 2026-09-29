@@ -97,6 +97,8 @@ input.invalid{border-color:#e0705c!important}
 .photo-cell .px:hover{color:#e0705c;border-color:#e0705c}
 #lightbox-img{width:100%;max-height:60vh;object-fit:contain;background:#000;border-radius:8px}
 .modal-card.wide{width:640px}
+#script-body input[type=text],#script-body input:not([type]),#script-body select{background:#141312;border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:7px;width:100%}
+#script-body input[type=checkbox]{width:auto;accent-color:var(--rust)}
 .modal{z-index:40}
 #modal-confirm{z-index:60}
 .toast{z-index:100}

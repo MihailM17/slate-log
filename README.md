@@ -6,7 +6,7 @@ Lightweight, offline-first scene & take tracker for film shoots. Mac + Windows f
 - Fast take logging: Bad / Maybe / Good, camera, lens (presets + custom), INT/EXT, shoot day, timecode (auto or manual), **stopwatch durations**, camera + audio filenames with auto-increment, quick notes
 - **Continuity stills** per scene (thumbnails, lightbox, captions, contact sheet in the report)
 - Scene status (Not shot / Partial / Complete) + **wrap progress board**
-- **CSV scene import** (with template), **daily report** view (print / save as PDF)
+- **CSV scene import** (with template), **screenplay PDF import** (auto scene list with review), **daily report** view (print / save as PDF)
 - SQLite storage on your machine - no account, no cloud, works offline on set
 - Exports: Excel (All Takes, Good Selects, per-day stats), **PDF daily log**, **EDL selects timeline** (Resolve / Premiere / Avid)
 - **📷 Set mode**: phones on the set WiFi scan a QR and push continuity stills + quick takes live - no install, no accounts, no internet

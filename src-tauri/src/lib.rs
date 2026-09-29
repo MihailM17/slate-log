@@ -1,6 +1,7 @@
 pub mod db;
 pub mod export;
 pub mod net;
+pub mod script;
 
 use db::{NewProject, NewScene, NewTake, Project, Scene, Setup, Take, TakeWithScene, UpdateTake};
 use tauri::{AppHandle, Manager};
@@ -123,7 +124,7 @@ async fn add_photo(app: AppHandle, scene_id: i64, setup_id: Option<i64>) -> Resu
         let (tx, rx) = std::sync::mpsc::channel::<Option<FilePath>>();
         app2.dialog()
             .file()
-            .add_filter("Images", &["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff", "gif"])
+            .add_filter("Images", &["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff", "gif", "heic", "heif"])
             .pick_file(move |p| {
                 let _ = tx.send(p);
             });
@@ -333,8 +334,88 @@ async fn import_scenes_csv(app: AppHandle, project_id: i64) -> Result<serde_json
 }
 
 #[tauri::command]
-fn write_template_csv(app: AppHandle) -> Result<String, String> {
-    let docs = app
+async fn import_screenplay_pdf(app: AppHandle) -> Result<serde_json::Value, String> {
+    use tauri_plugin_dialog::FilePath;
+    let app2 = app.clone();
+    let picked: Option<FilePath> = tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let (tx, rx) = std::sync::mpsc::channel::<Option<FilePath>>();
+        app2.dialog()
+            .file()
+            .add_filter("Screenplay", &["pdf"])
+            .pick_file(move |p| {
+                let _ = tx.send(p);
+            });
+        rx.recv().unwrap_or(None)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let path = match picked {
+        Some(FilePath::Path(p)) => p,
+        Some(_) => return Err("Only local files can be imported".into()),
+        None => return Ok(serde_json::json!({ "cancelled": true })),
+    };
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    if bytes.len() > 50_000_000 {
+        return Err("PDF is too large (50MB max)".into());
+    }
+    let text = pdf_extract::extract_text_from_mem(&bytes).map_err(|e| e.to_string())?;
+    if text.trim().len() < 50 {
+        return Err("No readable text found — scanned/image PDFs need OCR first".into());
+    }
+    let (scenes, warnings) = script::parse_screenplay(&text);
+    if scenes.is_empty() {
+        return Err("No scene headings found (looked for INT./EXT. slugs)".into());
+    }
+    Ok(serde_json::json!({ "cancelled": false, "scenes": scenes, "warnings": warnings }))
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ScriptSceneIn {
+    number: String,
+    title: String,
+    int_ext: String,
+    daypart: String,
+    location: String,
+}
+
+#[tauri::command]
+fn import_parsed_scenes(app: AppHandle, project_id: i64, scenes: Vec<ScriptSceneIn>) -> Result<serde_json::Value, String> {
+    let norm_ie = |v: &str| {
+        if v.to_lowercase().starts_with('e') { "EXT".to_string() } else { "INT".to_string() }
+    };
+    let norm_dp = |v: &str| match v {
+        "Dusk" | "Night" | "Dawn" => v.to_string(),
+        _ => "Day".to_string(),
+    };
+    let (mut imported, mut duplicates, mut skipped) = (0, 0, 0);
+    for s in scenes {
+        if s.number.trim().is_empty() {
+            skipped += 1;
+            continue;
+        }
+        let scene = db::NewScene {
+            number: s.number.trim().to_string(),
+            title: s.title.trim().to_string(),
+            int_ext: norm_ie(&s.int_ext),
+            daypart: norm_dp(&s.daypart),
+            day: 1,
+            location: s.location.trim().to_string(),
+            status: "Not shot".to_string(),
+            description: String::new(),
+            camera_default: String::new(),
+        };
+        match db::insert_scene(&app, project_id, scene) {
+            Ok(_) => imported += 1,
+            Err(e) if e.to_string().contains("already exists") => duplicates += 1,
+            Err(_) => skipped += 1,
+        }
+    }
+    Ok(serde_json::json!({ "imported": imported, "duplicates": duplicates, "skipped": skipped }))
+}
+
+#[tauri::command]
+fn write_template_csv(app: AppHandle) -> Result<String, String> {    let docs = app
         .path()
         .document_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."));
@@ -454,6 +535,8 @@ pub fn run() {
             export_edl,
             import_scenes_csv,
             write_template_csv,
+            import_screenplay_pdf,
+            import_parsed_scenes,
             list_takes,
             list_project_takes,
             next_take,

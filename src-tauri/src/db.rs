@@ -740,8 +740,46 @@ pub fn import_photo(app: &AppHandle, scene_id: i64, setup_id: Option<i64>, src: 
         }
     }
     // Decode from bytes (magic-number sniffing), never from the file
-    // extension - uploads arrive as .tmp and phones send all sorts of names.
-    let bytes = std::fs::read(&src).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+    // extension — uploads arrive as .tmp and phones send all sorts of names.
+    let src_ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+    // iPhones set to High Efficiency send HEIC, which no pure-Rust decoder
+    // reads — on macOS the system converter handles it, elsewhere we say so.
+    let _heic_tmp: Option<PathBuf>;
+    let decode_src: PathBuf = if src_ext == "heic" || src_ext == "heif" {
+        #[cfg(target_os = "macos")]
+        {
+            let out = std::env::temp_dir().join(format!("slate-heic-{}.jpg", unique_stem()));
+            let st = std::process::Command::new("sips")
+                .args(["-s", "format", "jpeg"])
+                .arg(&src)
+                .arg("--out")
+                .arg(&out)
+                .output()
+                .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+            if !st.status.success() {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "could not convert that HEIC photo — set the camera to JPEG".to_string(),
+                ));
+            }
+            _heic_tmp = Some(out.clone());
+            out
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = _heic_tmp;
+            return Err(rusqlite::Error::InvalidParameterName(
+                "HEIC photos convert on macOS only — set the camera to JPEG".to_string(),
+            ));
+        }
+    } else {
+        _heic_tmp = None;
+        src.clone()
+    };
+    let bytes = std::fs::read(&decode_src).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
     let fmt = image::guess_format(&bytes).map_err(|_| {
         rusqlite::Error::InvalidParameterName(
             "photo must be a JPEG, PNG, WebP or GIF image (HEIC is not supported - set the camera to JPEG)".to_string(),
@@ -750,19 +788,30 @@ pub fn import_photo(app: &AppHandle, scene_id: i64, setup_id: Option<i64>, src: 
     let img = image::load_from_memory_with_format(&bytes, fmt).map_err(|_| {
         rusqlite::Error::InvalidParameterName("could not decode that photo - try JPEG".to_string())
     })?;
-    let ext = src
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase())
-        .filter(|e| ["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff", "gif"].contains(&e.as_str()))
-        .unwrap_or_else(|| "jpg".to_string());
+    // The stored file is always decoded pixels: HEIC arrives converted.
+    let is_heic = src_ext == "heic" || src_ext == "heif";
+    let ext = if is_heic {
+        "jpg".to_string()
+    } else {
+        decode_src
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_lowercase())
+            .filter(|e| ["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff", "gif"].contains(&e.as_str()))
+            .unwrap_or_else(|| "jpg".to_string())
+    };
+    let store_src = if is_heic { decode_src.clone() } else { src.clone() };
     let dir = photos_dir(app, project_id);
     let thumbs = dir.join("thumbs");
     std::fs::create_dir_all(&thumbs).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
     let stem = unique_stem();
     let filename = format!("{stem}.{ext}");
     let dest = dir.join(&filename);
-    std::fs::copy(&src, &dest).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+    std::fs::copy(&store_src, &dest).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+    if is_heic {
+        // Converted temp, not the user's file — always safe to remove.
+        let _ = std::fs::remove_file(&decode_src);
+    }
     // 480px thumbnail for grids + contact sheets; full file kept for lightbox.
     let thumb = img.thumbnail(480, 480);
     let thumb_name = format!("{stem}_thumb.jpg");

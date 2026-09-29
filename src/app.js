@@ -160,7 +160,7 @@ function renderHome() {
 }
 
 function showView(name) {
-  for (const v of ["home", "app", "report", "progress"]) {
+  for (const v of ["home", "app", "report", "progress", "script"]) {
     $(`view-${v}`).classList.toggle("hidden", name !== v);
   }
 }
@@ -1056,7 +1056,63 @@ async function pushSceneToServer() {
   if (!$("modal-set").classList.contains("hidden")) refreshSetScene();
 }
 
+// ---------- screenplay import (parse, review, import) ----------
+let parsedScript = [];
+
+async function openScriptImport() {
+  if (!state.activeProjectId) { toast("Open a project first"); return; }
+  try {
+    const r = await invoke("import_screenplay_pdf");
+    if (r.cancelled) { toast("Import cancelled"); return; }
+    parsedScript = r.scenes || [];
+    if (!parsedScript.length) { toast("No scenes found"); return; }
+    $("script-sub").textContent = `${parsedScript.length} scenes found — uncheck or fix anything odd, then import (day defaults to 1)`;
+    $("script-warn").textContent = (r.warnings || []).join(" · ");
+    renderScriptReview();
+    showView("script");
+  } catch (e) { toast("Script import failed: " + e); }
+}
+
+function renderScriptReview() {
+  const tb = $("script-body"); tb.innerHTML = "";
+  parsedScript.forEach((s, i) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><input type="checkbox" data-i="${i}" checked></td>
+      <td><input data-f="number" data-i="${i}" value="${esc(s.number)}"></td>
+      <td><input data-f="title" data-i="${i}" value="${esc(s.title)}"></td>
+      <td><select data-f="int_ext" data-i="${i}"><option${s.int_ext === "INT" ? " selected" : ""}>INT</option><option${s.int_ext === "EXT" ? " selected" : ""}>EXT</option></select></td>
+      <td><select data-f="daypart" data-i="${i}">${["Day", "Dusk", "Night", "Dawn"].map((d) => `<option${s.daypart === d ? " selected" : ""}>${d}</option>`).join("")}</select></td>
+      <td><input data-f="location" data-i="${i}" value="${esc(s.location)}"></td>`;
+    tb.appendChild(tr);
+  });
+}
+
+async function importReviewedScript() {
+  const rows = [...document.querySelectorAll("#script-body tr")].map((tr) => {
+    const get = (f) => tr.querySelector(`[data-f="${f}"]`).value;
+    return {
+      checked: tr.querySelector("input[type=checkbox]").checked,
+      number: get("number"), title: get("title"), int_ext: get("int_ext"),
+      daypart: get("daypart"), location: get("location"),
+    };
+  }).filter((r) => r.checked);
+  if (!rows.length) { toast("Nothing checked"); return; }
+  try {
+    const r = await invoke("import_parsed_scenes", {
+      projectId: state.activeProjectId,
+      scenes: rows.map(({ checked, ...s }) => s),
+    });
+    sndClick();
+    toast(`Imported ${r.imported} scenes${r.duplicates ? ` (${r.duplicates} duplicates skipped)` : ""}${r.skipped ? `, ${r.skipped} rows skipped` : ""}`);
+    showView("app");
+    await loadScenes();
+  } catch (e) { toast("Import failed: " + e); }
+}
+
 // ---------- wire ----------
+$("btn-script").onclick = openScriptImport;
+$("btn-script-back").onclick = () => showView("app");
+$("btn-script-import").onclick = importReviewedScript;
 $("btn-report").onclick = openReport;
 $("btn-report-back").onclick = () => showView("app");
 $("report-day").onchange = renderReport;

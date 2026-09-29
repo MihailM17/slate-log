@@ -53,6 +53,7 @@
       </div>
       <div class="top-actions">
         <button id="btn-import" class="btn ghost" title="Import scenes from CSV">⤓ Import</button>
+        <button id="btn-script" class="btn ghost" title="Import scenes from a screenplay PDF">Script</button>
         <button id="btn-new-scene" class="btn primary">+ New scene</button>
       </div>
     </header>
@@ -107,8 +108,27 @@
   </main>
 </div>
 
-<div id="view-progress" class="home hidden">
+<div id="view-script" class="home hidden">
   <header class="home-head">
+    <div>
+      <div class="brand"><span class="slate">SLATE</span> <span class="log">LOG</span></div>
+      <div class="sub" id="script-sub">Review parsed scenes — uncheck or fix anything odd, then import</div>
+    </div>
+    <div class="home-actions">
+      <button id="btn-script-back" class="btn ghost">← Back</button>
+      <button id="btn-script-import" class="btn primary">Import checked</button>
+    </div>
+  </header>
+  <p class="tiny" id="script-warn"></p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th></th><th>No.</th><th>Title</th><th>INT/EXT</th><th>Time</th><th>Location</th></tr></thead>
+      <tbody id="script-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="view-progress" class="home hidden">  <header class="home-head">
     <div>
       <div class="brand"><span class="slate">SLATE</span> <span class="log">LOG</span></div>
       <div class="sub" id="progress-sub">Wrap progress</div>
