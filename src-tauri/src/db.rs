@@ -18,6 +18,8 @@ pub struct Project {
     pub fps: f64,
     pub camera_a: String,
     pub camera_b: String,
+    #[serde(default)]
+    pub poster: String,
     pub scene_count: i64,
     pub take_count: i64,
     pub good_count: i64,
@@ -35,6 +37,9 @@ pub struct NewProject {
     pub fps: f64,
     pub camera_a: String,
     pub camera_b: String,
+    /// Staged poster key from pick_stage_poster (attached on save). Absent = keep.
+    #[serde(default)]
+    pub poster_stage: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -253,6 +258,7 @@ fn connect(app: &AppHandle) -> rusqlite::Result<Connection> {
     let _ = conn.execute("ALTER TABLE takes ADD COLUMN setup_id INTEGER", []);
     let _ = conn.execute("ALTER TABLE takes ADD COLUMN duration_sec REAL NOT NULL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE projects ADD COLUMN fps REAL NOT NULL DEFAULT 25", []);
+    let _ = conn.execute("ALTER TABLE projects ADD COLUMN poster TEXT NOT NULL DEFAULT ''", []);
     // One "14" per project. May fail on DBs that already contain duplicates
     // from the unconstrained era - the app-level checks below still guard
     // all new writes either way.
@@ -356,7 +362,7 @@ pub fn backup_db(app: &AppHandle) {
 pub fn fetch_projects(app: &AppHandle) -> rusqlite::Result<Vec<Project>> {
     let conn = connect(app)?;
     let mut stmt = conn.prepare(
-        "SELECT p.id, p.film_name, p.director, p.camera_op, p.location, p.unit, p.shoot_day, p.total_days, p.fps, p.camera_a, p.camera_b,
+        "SELECT p.id, p.film_name, p.director, p.camera_op, p.location, p.unit, p.shoot_day, p.total_days, p.fps, p.camera_a, p.camera_b, p.poster,
                 (SELECT COUNT(*) FROM scenes s WHERE s.project_id=p.id) AS sc,
                 (SELECT COUNT(*) FROM takes t JOIN scenes s ON s.id=t.scene_id WHERE s.project_id=p.id) AS tc,
                 (SELECT COUNT(*) FROM takes t JOIN scenes s ON s.id=t.scene_id WHERE s.project_id=p.id AND t.rating='Good') AS gc
@@ -375,9 +381,10 @@ pub fn fetch_projects(app: &AppHandle) -> rusqlite::Result<Vec<Project>> {
             fps: r.get(8).unwrap_or(25.0),
             camera_a: r.get(9)?,
             camera_b: r.get(10)?,
-            scene_count: r.get(11)?,
-            take_count: r.get(12)?,
-            good_count: r.get(13)?,
+            poster: r.get(11).unwrap_or_default(),
+            scene_count: r.get(12)?,
+            take_count: r.get(13)?,
+            good_count: r.get(14)?,
         })
     })?;
     rows.collect()
@@ -399,7 +406,13 @@ pub fn insert_project(app: &AppHandle, p: NewProject) -> rusqlite::Result<Projec
         params![p.film_name, p.director, p.camera_op, p.location, p.unit, p.shoot_day, p.total_days, fps, p.camera_a, p.camera_b],
     )?;
     let id = conn.last_insert_rowid();
-    Ok(Project { id, film_name: p.film_name, director: p.director, camera_op: p.camera_op, location: p.location, unit: p.unit, shoot_day: p.shoot_day, total_days: p.total_days, fps, camera_a: p.camera_a, camera_b: p.camera_b, scene_count: 0, take_count: 0, good_count: 0 })
+    let mut poster = String::new();
+    if let Some(key) = p.poster_stage {
+        if let Ok(name) = attach_staged_poster(app, &conn, id, &key) {
+            poster = name;
+        }
+    }
+    Ok(Project { id, film_name: p.film_name, director: p.director, camera_op: p.camera_op, location: p.location, unit: p.unit, shoot_day: p.shoot_day, total_days: p.total_days, fps, camera_a: p.camera_a, camera_b: p.camera_b, poster, scene_count: 0, take_count: 0, good_count: 0 })
 }
 
 pub fn update_project(app: &AppHandle, id: i64, p: NewProject) -> rusqlite::Result<()> {
@@ -409,10 +422,16 @@ pub fn update_project(app: &AppHandle, id: i64, p: NewProject) -> rusqlite::Resu
         "UPDATE projects SET film_name=?1, director=?2, camera_op=?3, location=?4, unit=?5, shoot_day=?6, total_days=?7, fps=?8, camera_a=?9, camera_b=?10 WHERE id=?11",
         params![p.film_name, p.director, p.camera_op, p.location, p.unit, p.shoot_day, p.total_days, fps, p.camera_a, p.camera_b, id],
     )?;
+    if let Some(key) = p.poster_stage {
+        let _ = attach_staged_poster(app, &conn, id, &key);
+    }
     Ok(())
 }
 
 pub fn remove_project(app: &AppHandle, id: i64) -> rusqlite::Result<()> {
+    if let Some(bundle) = capture_project_bundle(app, id) {
+        push_undo(UndoItem::Project(bundle));
+    }
     let conn = connect(app)?;
     // Drop photo files first (rows go with the scenes below).
     let scene_ids: Vec<i64> = conn
@@ -427,6 +446,7 @@ pub fn remove_project(app: &AppHandle, id: i64) -> rusqlite::Result<()> {
     }
     let dir = photos_dir(app, id);
     let _ = std::fs::remove_dir_all(dir);
+    delete_poster_files(app, id);
     conn.execute("DELETE FROM takes WHERE scene_id IN (SELECT id FROM scenes WHERE project_id=?1)", params![id])?;
     conn.execute("DELETE FROM setups WHERE scene_id IN (SELECT id FROM scenes WHERE project_id=?1)", params![id])?;
     conn.execute("DELETE FROM scenes WHERE project_id=?1", params![id])?;
@@ -444,9 +464,11 @@ pub fn duplicate_project(app: &AppHandle, id: i64) -> rusqlite::Result<Project> 
                 film_name: r.get(0)?, director: r.get(1)?, camera_op: r.get(2)?,
                 location: r.get(3)?, unit: r.get(4)?, shoot_day: r.get(5)?,
                 total_days: r.get(6)?, fps: r.get(7).unwrap_or(25.0), camera_a: r.get(8)?, camera_b: r.get(9)?,
+                poster_stage: None,
             })
         },
     )?;
+    let src_poster: String = conn.query_row("SELECT poster FROM projects WHERE id=?1", params![id], |r| r.get(0)).unwrap_or_default();
     let name = format!("Copy of {}", src.film_name);
     let fps = valid_fps(src.fps);
     conn.execute(
@@ -454,6 +476,13 @@ pub fn duplicate_project(app: &AppHandle, id: i64) -> rusqlite::Result<Project> 
         params![name, src.director, src.camera_op, src.location, src.unit, src.shoot_day, src.total_days, fps, src.camera_a, src.camera_b],
     )?;
     let new_pid = conn.last_insert_rowid();
+    let mut new_poster = String::new();
+    if !src_poster.is_empty() {
+        new_poster = copy_poster_file(app, id, new_pid).unwrap_or_default();
+        if !new_poster.is_empty() {
+            let _ = conn.execute("UPDATE projects SET poster=?1 WHERE id=?2", params![new_poster, new_pid]);
+        }
+    }
     // Copy scenes, remembering old -> new ids for setups and takes.
     let mut stmt = conn.prepare(
         "SELECT id, number, title, int_ext, daypart, day, location, status, description, camera_default FROM scenes WHERE project_id=?1",
@@ -527,7 +556,7 @@ pub fn duplicate_project(app: &AppHandle, id: i64) -> rusqlite::Result<Project> 
     Ok(Project {
         id: new_pid, film_name: name, director: src.director, camera_op: src.camera_op,
         location: src.location, unit: src.unit, shoot_day: src.shoot_day, total_days: src.total_days,
-        fps, camera_a: src.camera_a, camera_b: src.camera_b, scene_count: 0, take_count: 0, good_count: 0,
+        fps, camera_a: src.camera_a, camera_b: src.camera_b, poster: new_poster, scene_count: 0, take_count: 0, good_count: 0,
     })
 }
 
@@ -639,6 +668,10 @@ pub fn update_scene(app: &AppHandle, id: i64, s: NewScene) -> rusqlite::Result<(
 }
 
 pub fn remove_scene(app: &AppHandle, id: i64) -> rusqlite::Result<()> {
+    // Snapshot for Ctrl+Z before anything is destroyed.
+    if let Some(bundle) = capture_scene_bundle(app, id) {
+        push_undo(UndoItem::Scene(bundle));
+    }
     let conn = connect(app)?;
     let project_id: i64 = conn.query_row("SELECT project_id FROM scenes WHERE id=?1", params![id], |r| r.get(0)).unwrap_or(0);
     delete_scene_photos(app, &conn, id, project_id);
@@ -1033,4 +1066,437 @@ pub fn stats(app: &AppHandle, project_id: Option<i64>) -> rusqlite::Result<(i64,
         }
     };
     Ok((total, goods))
+}
+
+// ---------- Photo counts for tables + Excel ----------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScenePhotoCount {
+    pub scene_id: i64,
+    pub count: i64,
+}
+
+pub fn photo_counts_for_project(app: &AppHandle, project_id: i64) -> rusqlite::Result<Vec<ScenePhotoCount>> {
+    let conn = connect(app)?;
+    let mut stmt = conn.prepare(
+        "SELECT p.scene_id, COUNT(*) FROM photos p JOIN scenes s ON s.id=p.scene_id WHERE s.project_id=?1 GROUP BY p.scene_id",
+    )?;
+    let rows = stmt.query_map(params![project_id], |r| {
+        Ok(ScenePhotoCount { scene_id: r.get(0)?, count: r.get(1)? })
+    })?;
+    rows.collect()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PhotoLabel {
+    pub scene_id: i64,
+    pub setup_id: Option<i64>,
+    pub filename: String,
+    pub caption: String,
+}
+
+pub fn photo_labels_for_project(app: &AppHandle, project_id: i64) -> rusqlite::Result<Vec<PhotoLabel>> {
+    let conn = connect(app)?;
+    let mut stmt = conn.prepare(
+        "SELECT p.scene_id, p.setup_id, p.filename, p.caption FROM photos p JOIN scenes s ON s.id=p.scene_id WHERE s.project_id=?1 ORDER BY p.id",
+    )?;
+    let rows = stmt.query_map(params![project_id], |r| {
+        Ok(PhotoLabel { scene_id: r.get(0)?, setup_id: r.get(1).unwrap_or(None), filename: r.get(2)?, caption: r.get(3)? })
+    })?;
+    rows.collect()
+}
+
+// ---------- Project posters (one image per project, stored in app data) ----------
+
+fn posters_dir(app: &AppHandle) -> PathBuf {
+    let dir = db_path(app);
+    let base = dir.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+    base.join("posters")
+}
+
+fn poster_path(app: &AppHandle, project_id: i64) -> PathBuf {
+    posters_dir(app).join(format!("{project_id}.jpg"))
+}
+
+fn delete_poster_files(app: &AppHandle, project_id: i64) {
+    let _ = std::fs::remove_file(poster_path(app, project_id));
+}
+
+fn copy_poster_file(app: &AppHandle, from_id: i64, to_id: i64) -> rusqlite::Result<String> {
+    let src = poster_path(app, from_id);
+    if std::fs::metadata(&src).is_err() {
+        return Ok(String::new());
+    }
+    let _ = std::fs::create_dir_all(posters_dir(app));
+    std::fs::copy(&src, poster_path(app, to_id)).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+    Ok(format!("{to_id}.jpg"))
+}
+
+/// Staged poster bytes picked from the file dialog, keyed until save.
+fn poster_stage() -> &'static std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>> {
+    static STAGE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>> =
+        std::sync::OnceLock::new();
+    STAGE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+fn stage_poster_bytes(jpg: Vec<u8>) -> String {
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let key = format!(
+        "{}-{}",
+        unique_stem(),
+        N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
+    if let Ok(mut m) = poster_stage().lock() {
+        while m.len() > 10 {
+            if let Some(k) = m.keys().next().cloned() {
+                m.remove(&k);
+            } else {
+                break;
+            }
+        }
+        m.insert(key.clone(), jpg);
+    }
+    key
+}
+
+/// Decode any common image, shrink to 960px wide, return JPEG bytes.
+fn process_poster_bytes(raw: &[u8]) -> Result<Vec<u8>, String> {
+    let fmt = image::guess_format(raw)
+        .map_err(|_| "poster must be a JPEG, PNG, WebP or GIF image".to_string())?;
+    let img = image::load_from_memory_with_format(raw, fmt)
+        .map_err(|_| "could not decode that image — try JPEG or PNG".to_string())?;
+    let img = if img.width() > 960 {
+        img.resize(960, 960, image::imageops::FilterType::Lanczos3)
+    } else {
+        img
+    };
+    let mut buf = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Jpeg)
+        .map_err(|e| e.to_string())?;
+    Ok(buf)
+}
+
+pub fn stage_poster_file(src: PathBuf) -> rusqlite::Result<String> {
+    let raw = std::fs::read(&src).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+    if raw.len() > 25_000_000 {
+        return Err(rusqlite::Error::InvalidParameterName("image is too large (25MB max)".into()));
+    }
+    let jpg = process_poster_bytes(&raw).map_err(rusqlite::Error::InvalidParameterName)?;
+    Ok(stage_poster_bytes(jpg))
+}
+
+pub fn staged_poster_data_url(key: &str) -> rusqlite::Result<String> {
+    let m = poster_stage()
+        .lock()
+        .map_err(|_| rusqlite::Error::InvalidParameterName("poster staging failed".into()))?;
+    let bytes = m
+        .get(key)
+        .ok_or_else(|| rusqlite::Error::InvalidParameterName("staged poster expired — pick it again".into()))?;
+    use base64::Engine as _;
+    Ok(format!(
+        "data:image/jpeg;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
+}
+
+fn attach_staged_poster(app: &AppHandle, conn: &rusqlite::Connection, project_id: i64, key: &str) -> rusqlite::Result<String> {
+    let bytes = poster_stage()
+        .lock()
+        .map_err(|_| rusqlite::Error::InvalidParameterName("poster staging failed".into()))?
+        .remove(key)
+        .ok_or_else(|| rusqlite::Error::InvalidParameterName("staged poster expired — pick it again".into()))?;
+    let _ = std::fs::create_dir_all(posters_dir(app));
+    std::fs::write(poster_path(app, project_id), &bytes)
+        .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+    let name = format!("{project_id}.jpg");
+    conn.execute("UPDATE projects SET poster=?1 WHERE id=?2", params![name, project_id])?;
+    Ok(name)
+}
+
+pub fn remove_poster(app: &AppHandle, project_id: i64) -> rusqlite::Result<()> {
+    let conn = connect(app)?;
+    conn.execute("UPDATE projects SET poster='' WHERE id=?1", params![project_id])?;
+    delete_poster_files(app, project_id);
+    Ok(())
+}
+
+pub fn poster_data_url(app: &AppHandle, project_id: i64) -> rusqlite::Result<String> {
+    let conn = connect(app)?;
+    let name: String = conn
+        .query_row("SELECT poster FROM projects WHERE id=?1", params![project_id], |r| {
+            r.get(0)
+        })
+        .unwrap_or_default();
+    if name.is_empty() {
+        return Ok(String::new());
+    }
+    let bytes = std::fs::read(poster_path(app, project_id))
+        .map_err(|_| rusqlite::Error::InvalidParameterName("poster file is missing".into()))?;
+    use base64::Engine as _;
+    Ok(format!(
+        "data:image/jpeg;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(&bytes)
+    ))
+}
+
+// ---------- Bulk camera replace ----------
+
+pub fn set_all_scene_cameras(app: &AppHandle, project_id: i64, camera: String) -> rusqlite::Result<i64> {
+    let conn = connect(app)?;
+    let n = conn.execute(
+        "UPDATE scenes SET camera_default=?1 WHERE project_id=?2",
+        params![camera, project_id],
+    )?;
+    Ok(n as i64)
+}
+
+// ---------- Undo (Ctrl+Z) for scene / project deletes ----------
+
+#[derive(Debug, Clone)]
+struct PhotoBackup {
+    id: i64,
+    scene_id: i64,
+    setup_id: Option<i64>,
+    filename: String,
+    caption: String,
+    created_at: String,
+    full_bytes: Vec<u8>,
+    thumb_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+struct SceneBundle {
+    id: i64,
+    project_id: i64,
+    number: String,
+    title: String,
+    int_ext: String,
+    daypart: String,
+    day: i64,
+    location: String,
+    status: String,
+    description: String,
+    camera_default: String,
+    takes: Vec<Take>,
+    setups: Vec<Setup>,
+    photos: Vec<PhotoBackup>,
+}
+
+#[derive(Debug, Clone)]
+struct ProjectBundle {
+    id: i64,
+    film_name: String,
+    director: String,
+    camera_op: String,
+    location: String,
+    unit: String,
+    shoot_day: i64,
+    total_days: i64,
+    fps: f64,
+    camera_a: String,
+    camera_b: String,
+    poster: String,
+    poster_bytes: Vec<u8>,
+    scenes: Vec<SceneBundle>,
+}
+
+#[derive(Debug, Clone)]
+enum UndoItem {
+    Scene(SceneBundle),
+    Project(ProjectBundle),
+}
+
+fn undo_stack() -> &'static std::sync::Mutex<Vec<UndoItem>> {
+    static STACK: std::sync::OnceLock<std::sync::Mutex<Vec<UndoItem>>> = std::sync::OnceLock::new();
+    STACK.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+fn push_undo(item: UndoItem) {
+    if let Ok(mut s) = undo_stack().lock() {
+        s.push(item);
+        while s.len() > 20 {
+            s.remove(0);
+        }
+    }
+}
+
+fn backup_photo_files(app: &AppHandle, project_id: i64, meta: &Photo) -> (Vec<u8>, Vec<u8>) {
+    let (full, th) = photo_files(app, project_id, &meta.filename);
+    let full_b = std::fs::read(&full).unwrap_or_default();
+    let th_b = std::fs::read(&th).unwrap_or_default();
+    (full_b, th_b)
+}
+
+fn capture_scene_bundle(app: &AppHandle, scene_id: i64) -> Option<SceneBundle> {
+    let sc = fetch_scenes_for(app, scene_id)?;
+    let takes = fetch_takes(app, scene_id).unwrap_or_default();
+    let setups = fetch_setups(app, scene_id).unwrap_or_default();
+    let photos_meta = fetch_photos(app, scene_id).unwrap_or_default();
+    let photos = photos_meta
+        .iter()
+        .map(|p| {
+            let (full_b, th_b) = backup_photo_files(app, sc.project_id, p);
+            PhotoBackup {
+                id: p.id,
+                scene_id: p.scene_id,
+                setup_id: p.setup_id,
+                filename: p.filename.clone(),
+                caption: p.caption.clone(),
+                created_at: p.created_at.clone(),
+                full_bytes: full_b,
+                thumb_bytes: th_b,
+            }
+        })
+        .collect();
+    Some(SceneBundle {
+        id: sc.id,
+        project_id: sc.project_id,
+        number: sc.number,
+        title: sc.title,
+        int_ext: sc.int_ext,
+        daypart: sc.daypart,
+        day: sc.day,
+        location: sc.location,
+        status: sc.status,
+        description: sc.description,
+        camera_default: sc.camera_default,
+        takes,
+        setups,
+        photos,
+    })
+}
+
+fn capture_project_bundle(app: &AppHandle, project_id: i64) -> Option<ProjectBundle> {
+    let conn = connect(app).ok()?;
+    let (film_name, director, camera_op, location, unit, shoot_day, total_days, fps, camera_a, camera_b, poster): (String, String, String, String, String, i64, i64, f64, String, String, String) =
+        conn.query_row(
+            "SELECT film_name, director, camera_op, location, unit, shoot_day, total_days, fps, camera_a, camera_b, poster FROM projects WHERE id=?1",
+            params![project_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7).unwrap_or(25.0), r.get(8)?, r.get(9)?, r.get(10).unwrap_or_default())),
+        ).ok()?;
+    let poster_bytes = if poster.is_empty() { Vec::new() } else { std::fs::read(poster_path(app, project_id)).unwrap_or_default() };
+    let scenes = fetch_scenes(app, project_id).unwrap_or_default();
+    let mut bundles = Vec::new();
+    for s in scenes {
+        if let Some(b) = capture_scene_bundle(app, s.id) {
+            bundles.push(b);
+        }
+    }
+    Some(ProjectBundle {
+        id: project_id,
+        film_name,
+        director,
+        camera_op,
+        location,
+        unit,
+        shoot_day,
+        total_days,
+        fps,
+        camera_a,
+        camera_b,
+        poster,
+        poster_bytes,
+        scenes: bundles,
+    })
+}
+
+fn restore_photo_files(app: &AppHandle, project_id: i64, p: &PhotoBackup) {
+    if p.full_bytes.is_empty() {
+        return;
+    }
+    let dir = photos_dir(app, project_id);
+    let thumbs = dir.join("thumbs");
+    let _ = std::fs::create_dir_all(&thumbs);
+    let (full, th) = photo_files(app, project_id, &p.filename);
+    let _ = std::fs::write(&full, &p.full_bytes);
+    if !p.thumb_bytes.is_empty() {
+        let _ = std::fs::write(&th, &p.thumb_bytes);
+    }
+}
+
+fn insert_scene_bundle(conn: &rusqlite::Connection, app: &AppHandle, b: &SceneBundle) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO scenes (id, project_id, number, title, int_ext, daypart, day, location, status, description, camera_default) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        params![b.id, b.project_id, b.number, b.title, b.int_ext, b.daypart, b.day, b.location, b.status, b.description, b.camera_default],
+    )?;
+    for u in &b.setups {
+        conn.execute(
+            "INSERT INTO setups (id, scene_id, name) VALUES (?,?,?)",
+            params![u.id, b.id, u.name],
+        )?;
+    }
+    for t in &b.takes {
+        conn.execute(
+            "INSERT INTO takes (id, scene_id, take_no, tc_in, cam, lens, rating, int_ext, day, duration_sec, cam_file, audio_file, setup_id, tags, note, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            params![t.id, b.id, t.take_no, t.tc_in, t.cam, t.lens, t.rating, t.int_ext, t.day, t.duration_sec, t.cam_file, t.audio_file, t.setup_id, t.tags, t.note, t.created_at],
+        )?;
+    }
+    for p in &b.photos {
+        conn.execute(
+            "INSERT INTO photos (id, scene_id, setup_id, filename, caption, created_at) VALUES (?,?,?,?,?,?)",
+            params![p.id, b.id, p.setup_id, p.filename, p.caption, p.created_at],
+        )?;
+        restore_photo_files(app, b.project_id, p);
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UndoResult {
+    pub message: String,
+    pub kind: String,
+    pub project_id: Option<i64>,
+    pub scene_id: Option<i64>,
+}
+
+pub fn undo_last_delete(app: &AppHandle) -> rusqlite::Result<UndoResult> {
+    let item = undo_stack().lock().map(|mut s| s.pop()).unwrap_or(None);
+    let item = item.ok_or_else(|| rusqlite::Error::InvalidParameterName("nothing to undo".into()))?;
+    let conn = connect(app)?;
+    match item {
+        UndoItem::Scene(b) => {
+            // Project may be gone (deleted after) — refuse rather than orphan.
+            let proj_exists: i64 = conn.query_row("SELECT COUNT(*) FROM projects WHERE id=?1", params![b.project_id], |r| r.get(0))?;
+            if proj_exists == 0 {
+                return Err(rusqlite::Error::InvalidParameterName("project is gone — cannot restore scene".into()));
+            }
+            if scene_number_taken(&conn, b.project_id, &b.number, None) {
+                return Err(rusqlite::Error::InvalidParameterName(format!("cannot undo — scene {} already exists", b.number)));
+            }
+            insert_scene_bundle(&conn, app, &b)?;
+            Ok(UndoResult {
+                message: format!("Scene {} restored", b.number),
+                kind: "scene".to_string(),
+                project_id: Some(b.project_id),
+                scene_id: Some(b.id),
+            })
+        }
+        UndoItem::Project(b) => {
+            let exists: i64 = conn.query_row("SELECT COUNT(*) FROM projects WHERE id=?1", params![b.id], |r| r.get(0))?;
+            if exists > 0 {
+                return Err(rusqlite::Error::InvalidParameterName("project already exists — cannot undo".into()));
+            }
+            conn.execute(
+                "INSERT INTO projects (id, film_name, director, camera_op, location, unit, shoot_day, total_days, fps, camera_a, camera_b, poster) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                params![b.id, b.film_name, b.director, b.camera_op, b.location, b.unit, b.shoot_day, b.total_days, b.fps, b.camera_a, b.camera_b, b.poster],
+            )?;
+            if !b.poster.is_empty() && !b.poster_bytes.is_empty() {
+                let _ = std::fs::create_dir_all(posters_dir(app));
+                let _ = std::fs::write(poster_path(app, b.id), &b.poster_bytes);
+            }
+            for s in &b.scenes {
+                insert_scene_bundle(&conn, app, s)?;
+            }
+            Ok(UndoResult {
+                message: format!("Project “{}” restored", b.film_name),
+                kind: "project".to_string(),
+                project_id: Some(b.id),
+                scene_id: None,
+            })
+        }
+    }
+}
+
+pub fn undo_available() -> bool {
+    undo_stack().lock().map(|s| !s.is_empty()).unwrap_or(false)
 }

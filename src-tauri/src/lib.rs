@@ -371,7 +371,8 @@ async fn import_screenplay_pdf(app: AppHandle) -> Result<serde_json::Value, Stri
 }
 
 /// PDF text the tolerant way: macOS Quartz (via textutil) reads the
-/// malformed files strict parsers reject; pdf-extract covers the rest.
+/// malformed files strict parsers reject; pdf-extract covers the rest;
+/// raw stream scraping is the last resort for broken xrefs.
 fn extract_script_text(path: &std::path::Path, bytes: &[u8]) -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
@@ -388,14 +389,17 @@ fn extract_script_text(path: &std::path::Path, bytes: &[u8]) -> Result<String, S
             }
         }
     }
-    pdf_extract::extract_text_from_mem(bytes).map_err(|e| {
-        let m = e.to_string();
-        if m.contains("cross-reference") || m.contains("xref") {
-            "PDF structure is damaged (bad cross-reference table) — paste the text below instead".to_string()
-        } else {
-            m
+    if let Ok(t) = pdf_extract::extract_text_from_mem(bytes) {
+        if t.trim().len() >= 50 {
+            return Ok(t);
         }
-    })
+    }
+    // Last resort: inflate raw content streams even when the xref is broken.
+    let raw = script::extract_raw_text(bytes);
+    if raw.trim().len() >= 50 {
+        return Ok(raw);
+    }
+    Err("No readable text found — scanned/image PDFs need OCR first, or paste the text below".to_string())
 }
 
 #[tauri::command]
@@ -464,19 +468,6 @@ fn import_parsed_scenes(app: AppHandle, project_id: i64, scenes: Vec<ScriptScene
 }
 
 #[tauri::command]
-fn write_template_csv(app: AppHandle) -> Result<String, String> {    let docs = app
-        .path()
-        .document_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let path = docs.join("slate-log-template.csv");
-    let template = "number,title,int_ext,daypart,day,location,description,camera\n\
-                    14,Abandoned lift station,INT,Day,4,Lift station,Wide push through the rusted gate,A · Sony FX6\n\
-                    15,Engineer interview,INT,Day,4,,Seated interview 35mm,B · Sony FX3\n";
-    std::fs::write(&path, template).map_err(|e| e.to_string())?;
-    Ok(path.to_string_lossy().to_string())
-}
-
-#[tauri::command]
 async fn check_update(app: AppHandle) -> Result<serde_json::Value, String> {
     use tauri_plugin_updater::UpdaterExt;
     let update = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
@@ -516,6 +507,79 @@ fn get_stats(app: AppHandle, project_id: Option<i64>) -> Result<serde_json::Valu
 }
 
 #[tauri::command]
+fn photo_counts(app: AppHandle, project_id: i64) -> Result<Vec<db::ScenePhotoCount>, String> {
+    db::photo_counts_for_project(&app, project_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn project_photo_labels(app: AppHandle, project_id: i64) -> Result<Vec<db::PhotoLabel>, String> {
+    db::photo_labels_for_project(&app, project_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_all_scene_cameras(app: AppHandle, project_id: i64, camera: String) -> Result<serde_json::Value, String> {
+    let cam = camera.trim().to_string();
+    if cam.is_empty() {
+        return Err("Camera is empty".into());
+    }
+    let n = db::set_all_scene_cameras(&app, project_id, cam).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "updated": n }))
+}
+
+#[tauri::command]
+async fn pick_stage_poster(app: AppHandle) -> Result<serde_json::Value, String> {
+    use tauri_plugin_dialog::FilePath;
+    let app2 = app.clone();
+    let picked: Option<FilePath> = tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let (tx, rx) = std::sync::mpsc::channel::<Option<FilePath>>();
+        app2.dialog()
+            .file()
+            .add_filter("Images", &["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff", "gif"])
+            .pick_file(move |p| {
+                let _ = tx.send(p);
+            });
+        rx.recv().unwrap_or(None)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let path = match picked {
+        Some(FilePath::Path(p)) => p,
+        Some(_) => return Err("Only local files can be used".into()),
+        None => return Ok(serde_json::json!({ "cancelled": true })),
+    };
+    let key = db::stage_poster_file(path).map_err(|e| {
+        e.to_string().replace("Invalid parameter name: ", "")
+    })?;
+    Ok(serde_json::json!({ "cancelled": false, "key": key }))
+}
+
+#[tauri::command]
+fn staged_poster_data(key: String) -> Result<String, String> {
+    db::staged_poster_data_url(&key)
+        .map_err(|e| e.to_string().replace("Invalid parameter name: ", ""))
+}
+
+#[tauri::command]
+fn project_poster_data(app: AppHandle, project_id: i64) -> Result<String, String> {
+    db::poster_data_url(&app, project_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_project_poster(app: AppHandle, project_id: i64) -> Result<(), String> {
+    db::remove_poster(&app, project_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn undo_delete(app: AppHandle) -> Result<db::UndoResult, String> {
+    db::undo_last_delete(&app).map_err(|e| {
+        let m = e.to_string();
+        // Strip rusqlite prefix for the toast.
+        m.replace("Invalid parameter name: ", "")
+    })
+}
+
+#[tauri::command]
 fn export_excel(
     app: AppHandle,
     project_id: i64,
@@ -540,10 +604,12 @@ fn export_excel(
         .unwrap_or_else(|| "slate-log".into());
     let fname = format!("{}-{}.xlsx", stem, chrono::Local::now().format("%Y%m%d-%H%M"));
     let path = docs.join(fname).to_string_lossy().to_string();
+    let photo_labels = db::photo_labels_for_project(&app, project_id).unwrap_or_default();
     export::write_workbook(
         &path,
         &scenes,
         &grouped,
+        &photo_labels,
         include_good.unwrap_or(true),
         include_days.unwrap_or(true),
     )?;
@@ -583,7 +649,6 @@ pub fn run() {
             export_pdf,
             export_edl,
             import_scenes_csv,
-            write_template_csv,
             import_screenplay_pdf,
             parse_screenplay_text,
             import_parsed_scenes,
@@ -595,6 +660,14 @@ pub fn run() {
             delete_take,
             get_stats,
             export_excel,
+            photo_counts,
+            project_photo_labels,
+            set_all_scene_cameras,
+            pick_stage_poster,
+            staged_poster_data,
+            project_poster_data,
+            remove_project_poster,
+            undo_delete,
             app_version,
             check_update,
             install_update,

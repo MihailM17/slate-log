@@ -1,4 +1,4 @@
-use crate::db::{Scene, TakeWithScene};
+use crate::db::{PhotoLabel, Scene, TakeWithScene};
 use printpdf::{Mm, PdfDocument};
 use rust_xlsxwriter::{Format, Workbook};
 use std::collections::{BTreeMap, BTreeSet};
@@ -198,11 +198,49 @@ pub fn write_pdf(
     Ok(())
 }
 
+fn photo_cell_for_take(t: &TakeWithScene, photo_labels: &[PhotoLabel]) -> String {
+    let mut relevant: Vec<&PhotoLabel> = photo_labels
+        .iter()
+        .filter(|p| p.scene_id == t.scene_id)
+        .collect();
+    if relevant.is_empty() {
+        return String::new();
+    }
+    // If the take has a setup, prefer matching setup + whole-scene stills.
+    if let Some(sid) = t.setup_id {
+        let matching: Vec<&PhotoLabel> = relevant
+            .iter()
+            .filter(|p| p.setup_id == Some(sid) || p.setup_id.is_none())
+            .copied()
+            .collect();
+        if !matching.is_empty() {
+            relevant = matching;
+        }
+    }
+    let details: Vec<String> = relevant
+        .iter()
+        .map(|p| {
+            if !p.caption.trim().is_empty() {
+                p.caption.trim().to_string()
+            } else {
+                p.filename.clone()
+            }
+        })
+        .collect();
+    let mut s = format!("{} attached", relevant.len());
+    if !details.is_empty() {
+        let joined: String = details.join("; ").chars().take(220).collect();
+        s.push_str(&format!(" ({})", joined));
+    }
+    s
+}
+
 fn write_take_row(
     ws: &mut rust_xlsxwriter::Worksheet,
     row: u32,
     scene: &Scene,
     t: &TakeWithScene,
+    photo: &str,
     wrap: &Format,
 ) -> Result<(), String> {
     let ie = if t.int_ext.is_empty() { &scene.int_ext } else { &t.int_ext };
@@ -223,6 +261,7 @@ fn write_take_row(
     ws.write_string(row, 13, &t.tags).map_err(|e| e.to_string())?;
     ws.write_string_with_format(row, 14, &t.note, wrap)
         .map_err(|e| e.to_string())?;
+    ws.write_string(row, 15, photo).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -231,6 +270,7 @@ pub fn write_workbook(
     path: &str,
     scenes: &[Scene],
     takes_by_scene: &[(Scene, Vec<TakeWithScene>)],
+    photo_labels: &[PhotoLabel],
     include_good: bool,
     include_days: bool,
 ) -> Result<(), String> {
@@ -243,32 +283,43 @@ pub fn write_workbook(
     // --- Sheet 1: All takes ---
     let ws = workbook.add_worksheet();
     ws.set_name("All Takes").map_err(|e| e.to_string())?;
-    let headers = ["Scene", "Setup", "Title", "Location", "Day", "INT/EXT", "Take", "TC In", "Cam", "Lens", "Camera file", "Audio file", "Rating", "Quick notes", "Description"];
+    let headers = ["Scene", "Setup", "Title", "Location", "Day", "INT/EXT", "Take", "TC In", "Cam", "Lens", "Camera file", "Audio file", "Rating", "Quick notes", "Description", "Photos"];
     for (c, h) in headers.iter().enumerate() {
         ws.write_string_with_format(0, c as u16, *h, &header)
             .map_err(|e| e.to_string())?;
     }
     let mut row: u32 = 1;
-    // day -> (scenes, takes, good)
-    let mut per_day: BTreeMap<i64, (BTreeSet<String>, i64, i64)> = BTreeMap::new();
+    // day -> (scenes, takes, good, photos)
+    let mut per_day: BTreeMap<i64, (BTreeSet<String>, i64, i64, i64)> = BTreeMap::new();
+    // scene_id -> day for photo day totals
+    let mut scene_day: BTreeMap<i64, i64> = BTreeMap::new();
     for (scene, takes) in takes_by_scene {
         for t in takes {
-            write_take_row(ws, row, scene, t, &wrap)?;
+            let photo = photo_cell_for_take(t, photo_labels);
+            write_take_row(ws, row, scene, t, &photo, &wrap)?;
             row += 1;
             let day = if t.day == 0 { scene.day } else { t.day };
-            let e = per_day.entry(day).or_insert_with(|| (BTreeSet::new(), 0, 0));
+            let e = per_day.entry(day).or_insert_with(|| (BTreeSet::new(), 0, 0, 0));
             e.0.insert(scene.number.clone());
             e.1 += 1;
             if t.rating == "Good" {
                 e.2 += 1;
             }
         }
+        let day = if scene.day == 0 { 1 } else { scene.day };
+        scene_day.insert(scene.id, day);
+    }
+    // Photos per day (counts stills even for scenes with no takes).
+    for p in photo_labels {
+        if let Some(d) = scene_day.get(&p.scene_id) {
+            per_day.entry(*d).or_insert_with(|| (BTreeSet::new(), 0, 0, 0)).3 += 1;
+        }
     }
     // Scenes with no takes still count toward their day
     for (scene, takes) in takes_by_scene {
         if takes.is_empty() {
             let day = if scene.day == 0 { 1 } else { scene.day };
-            per_day.entry(day).or_insert_with(|| (BTreeSet::new(), 0, 0)).0.insert(scene.number.clone());
+            per_day.entry(day).or_insert_with(|| (BTreeSet::new(), 0, 0, 0)).0.insert(scene.number.clone());
         }
     }
     ws.autofit();
@@ -284,7 +335,8 @@ pub fn write_workbook(
         let mut row2: u32 = 1;
         for (scene, takes) in takes_by_scene {
             for t in takes.iter().filter(|t| t.rating == "Good") {
-                write_take_row(ws2, row2, scene, t, &wrap)?;
+                let photo = photo_cell_for_take(t, photo_labels);
+                write_take_row(ws2, row2, scene, t, &photo, &wrap)?;
                 row2 += 1;
             }
         }
@@ -295,16 +347,17 @@ pub fn write_workbook(
     if include_days {
         let ws3 = workbook.add_worksheet();
         ws3.set_name("Days").map_err(|e| e.to_string())?;
-        for (c, h) in ["Day", "Scenes", "Takes", "Good"].iter().enumerate() {
+        for (c, h) in ["Day", "Scenes", "Takes", "Good", "Photos"].iter().enumerate() {
             ws3.write_string_with_format(0, c as u16, *h, &header)
                 .map_err(|e| e.to_string())?;
         }
         let mut row3: u32 = 1;
-        for (day, (scene_set, takes, good)) in &per_day {
+        for (day, (scene_set, takes, good, photos)) in &per_day {
             ws3.write_number(row3, 0, *day as f64).map_err(|e| e.to_string())?;
             ws3.write_number(row3, 1, scene_set.len() as f64).map_err(|e| e.to_string())?;
             ws3.write_number(row3, 2, *takes as f64).map_err(|e| e.to_string())?;
             ws3.write_number(row3, 3, *good as f64).map_err(|e| e.to_string())?;
+            ws3.write_number(row3, 4, *photos as f64).map_err(|e| e.to_string())?;
             row3 += 1;
         }
         ws3.autofit();

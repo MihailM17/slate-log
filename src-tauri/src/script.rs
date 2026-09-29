@@ -178,7 +178,8 @@ fn parse_line(line: &str) -> Option<(ParsedScene, Vec<String>)> {
     } else {
         (chunks[0].to_string(), "Day".to_string())
     };
-    // Recover original-cased text for the location/title.
+    // Recover original-cased text for the title. Location stays empty by
+    // default (opt-in via settings) so imports don't duplicate title->location.
     let orig_loc = {
         let idx = t.to_uppercase().find(&location).unwrap_or(0);
         t[idx..(idx + location.len()).min(t.len())].trim().to_string()
@@ -189,7 +190,7 @@ fn parse_line(line: &str) -> Option<(ParsedScene, Vec<String>)> {
             number,
             int_ext: int_ext.to_string(),
             title,
-            location: orig_loc,
+            location: String::new(),
             daypart,
             setups: Vec::new(),
         },
@@ -576,7 +577,8 @@ mod tests {
         assert_eq!(scenes.len(), 1);
         assert_eq!(scenes[0].number, "1");
         assert_eq!(scenes[0].int_ext, "EXT");
-        assert_eq!(scenes[0].location, "N. Y. - COURT OF GENERAL SESSIONS");
+        assert_eq!(scenes[0].title, "N. Y. - COURT OF GENERAL SESSIONS");
+        assert_eq!(scenes[0].location, "");
         assert_eq!(scenes[0].daypart, "Day");
         assert_eq!(scenes[0].setups.len(), 4);
         assert!(scenes[0].setups[0].contains("LOBBY"));
@@ -600,7 +602,8 @@ mod tests {
         assert_eq!(scenes.len(), 2);
         assert_eq!(scenes[0].number, "1");
         assert_eq!(scenes[0].int_ext, "INT");
-        assert_eq!(scenes[0].location, "ЧАСОВНИКАРСКА РАБОТИЛНИЦА");
+        assert_eq!(scenes[0].title, "ЧАСОВНИКАРСКА РАБОТИЛНИЦА");
+        assert_eq!(scenes[0].location, "");
         assert_eq!(scenes[0].daypart, "Day");
         assert_eq!(scenes[1].number, "2");
         assert_eq!(scenes[1].int_ext, "EXT");

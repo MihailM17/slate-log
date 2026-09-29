@@ -39,8 +39,8 @@
     <div class="side-foot"><span id="stat-total">0 takes</span><span id="stat-rate">0% good</span></div>
     <div class="side-tools">
       <button id="btn-settings" class="mini-btn" title="App settings">⚙ Settings</button>
-      <button id="btn-template" class="mini-btn" title="Save a blank CSV template to Documents">Template</button>
     </div>
+    <div id="sidebar-resize" title="Drag to resize scenes panel"></div>
   </aside>
 
   <main class="main">
@@ -53,7 +53,7 @@
       </div>
       <div class="top-actions">
         <button id="btn-import" class="btn ghost" title="Import scenes from CSV">⤓ Import</button>
-        <button id="btn-script" class="btn ghost" title="Import scenes from a screenplay PDF">Script</button>
+        <button id="btn-script" class="btn ghost" title="Import scenes from a screenplay PDF">⤓ Script</button>
         <button id="btn-new-scene" class="btn primary">+ New scene</button>
       </div>
     </header>
@@ -99,7 +99,7 @@
     <section class="logged-head"><strong>Logged so far</strong><span id="takes-count"></span><span class="logged-spacer"></span><button id="btn-report" class="btn ghost" title="Daily report (print / PDF)">⎙ Report</button><button id="btn-edl" class="btn ghost" title="Good-selects timeline for Resolve / Premiere / Avid">EDL selects</button><button id="btn-export" class="btn ghost">▦ Export to Excel</button></section>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Scene</th><th>Setup</th><th>Day</th><th>Take</th><th>TC in</th><th>Cam</th><th>INT/EXT</th><th>Lens</th><th>Camera file</th><th>Audio file</th><th>Rating</th><th>Quick notes</th><th>Description</th><th></th></tr></thead>
+        <thead><tr><th>Scene</th><th>Setup</th><th>Day</th><th>Take</th><th>TC in</th><th>Cam</th><th>INT/EXT</th><th>Lens</th><th>Camera file</th><th>Audio file</th><th>Rating</th><th>Quick notes</th><th>Description</th><th>Photos</th><th></th></tr></thead>
         <tbody id="takes-body"></tbody>
       </table>
     </div>
@@ -187,13 +187,13 @@
     <h2 id="modal-title">New scene</h2>
     <div class="grid2">
       <label>Number<input id="f-number" placeholder="14"></label>
-      <label>Title<input id="f-title" placeholder="Abandoned lift station"></label>
+      <label>Title<input id="f-title" placeholder="e.g. Meadow battle"></label>
       <label>INT/EXT<select id="f-intext"><option>INT</option><option>EXT</option></select></label>
       <label>Day part<select id="f-daypart"><option>Day</option><option>Dusk</option><option>Night</option><option>Dawn</option></select></label>
       <label>Shoot day<input id="f-day" type="number" min="1" value="1"></label>
       <label>Status<select id="f-status"><option>Not shot</option><option>Partial</option><option>Complete</option></select></label>
     </div>
-    <label>Location<input id="f-location" placeholder="Lift station, Vitosha"></label>
+    <label>Location<input id="f-location" placeholder="e.g. Pine forest"></label>
     <label>Camera<input id="f-camera" placeholder="A · Sony FX6"></label>
     <label>Description<textarea id="f-desc" rows="2"></textarea></label>
     <div class="modal-actions">
@@ -230,6 +230,13 @@
 <div id="modal-project" class="modal hidden">
   <div class="modal-card">
     <h2 id="project-modal-title">New project</h2>
+    <div class="poster-row">
+      <img id="p-poster" alt="Project poster preview">
+      <div class="poster-btns">
+        <div class="tiny">Poster (optional)</div>
+        <div class="rowbtns"><button id="btn-poster-pick" class="btn ghost">Choose…</button><button id="btn-poster-remove" class="btn ghost">Remove</button></div>
+      </div>
+    </div>
     <label>Film name<input id="p-film" placeholder="Untitled film"></label>
     <div class="grid2">
       <label>Director<input id="p-director" placeholder="Director"></label>
@@ -250,8 +257,9 @@
     <h2>Camera for this take</h2>
     <label>Camera<input id="cam-input" placeholder="A · Sony FX6" autocomplete="off"></label>
     <p class="tiny">Rarely changes mid-scene - saved per take.</p>
-    <div class="modal-actions">
+    <div class="modal-actions" style="flex-wrap:wrap">
       <button id="btn-cancel-cam" class="btn ghost">Cancel</button>
+      <button id="btn-replace-cam-all" class="btn ghost" title="Replace camera on all scenes in this project">Replace all</button>
       <button id="btn-save-cam" class="btn primary">Set camera</button>
     </div>
   </div>
@@ -260,37 +268,63 @@
 <div id="modal-settings" class="modal hidden">
   <div class="modal-card">
     <h2>App settings</h2>
-    <div class="set-sec">Behaviour</div>
-    <label class="check"><input type="checkbox" id="set-sound"> Play sounds</label>
-    <label class="check"><input type="checkbox" id="set-confirm"> Confirm before deleting</label>
-    <label class="check"><input type="checkbox" id="set-manual-tc"> Enter timecode manually per take</label>
-    <div class="set-sec">Defaults for new takes &amp; scenes</div>
-    <div class="grid2">
-      <label>Default rating<select id="set-def-rating"><option>Good</option><option>Maybe</option><option>Bad</option></select></label>
-      <label>Default lens<input id="set-def-lens" placeholder="35"></label>
-      <label>Default INT/EXT<select id="set-def-intext"><option>INT</option><option>EXT</option></select></label>
-      <label>Default camera<input id="set-def-cam" placeholder="A"></label>
+    <div class="set-tabs" id="set-tabs">
+      <button data-tab="general" class="on">General</button>
+      <button data-tab="defaults">Defaults</button>
+      <button data-tab="media">Media &amp; Export</button>
+      <button data-tab="system">System</button>
     </div>
-    <div class="set-sec">Quick notes (one per line)</div>
-    <label><textarea id="set-quick" rows="4"></textarea></label>
-    <div class="set-sec">Media filenames</div>
-    <label class="check"><input type="checkbox" id="set-autobump"> Suggest next filename (C0004 → C0005)</label>
-    <div class="set-sec">Set mode (phone link)</div>
-    <label>Preferred port<input id="set-port" type="number" min="1024" max="65535" value="17831"></label>
-    <div class="set-sec">Excel export</div>
-    <label class="check"><input type="checkbox" id="set-exp-good"> Include Good Selects sheet</label>
-    <label class="check"><input type="checkbox" id="set-exp-days"> Include Days stats sheet</label>
-    <div class="set-sec">Updates</div>
-    <label class="check"><input type="checkbox" id="set-check-startup"> Check for updates on launch</label>
-    <div class="rowbtns"><button id="btn-check-updates" class="btn ghost">Check for updates</button></div>
-    <p class="tiny" id="update-status"></p>
-    <div class="set-sec">Keyboard shortcuts</div>
-    <p class="tiny">Click a key, then press the replacement. Esc cancels.</p>
-    <div id="shortcut-rows"></div>
-    <div class="rowbtns"><button id="btn-shortcut-reset" class="btn ghost">Reset shortcuts</button></div>
+    <div class="set-pane" data-pane="general">
+      <div class="set-sec">Behaviour</div>
+      <label class="check"><input type="checkbox" id="set-sound"> Play sounds</label>
+      <label class="check"><input type="checkbox" id="set-confirm"> Confirm before deleting scenes/takes (projects always confirm)</label>
+      <label class="check"><input type="checkbox" id="set-manual-tc"> Enter timecode manually per take</label>
+      <div class="set-sec">Keyboard shortcuts</div>
+      <div class="rowbtns"><button id="btn-open-shortcuts" class="btn ghost">Keyboard shortcuts…</button></div>
+    </div>
+    <div class="set-pane hidden" data-pane="defaults">
+      <div class="set-sec">Defaults for new takes &amp; scenes</div>
+      <div class="grid2">
+        <label>Default rating<select id="set-def-rating"><option>Good</option><option>Maybe</option><option>Bad</option></select></label>
+        <label>Default lens<input id="set-def-lens" placeholder="35"></label>
+        <label>Default INT/EXT<select id="set-def-intext"><option>INT</option><option>EXT</option></select></label>
+        <label>Default camera<input id="set-def-cam" placeholder="A"></label>
+      </div>
+      <div class="set-sec">Quick notes (one per line)</div>
+      <label><textarea id="set-quick" rows="4"></textarea></label>
+    </div>
+    <div class="set-pane hidden" data-pane="media">
+      <div class="set-sec">Media filenames</div>
+      <label class="check"><input type="checkbox" id="set-autobump"> Suggest next filename (C0004 → C0005)</label>
+      <div class="set-sec">Screenplay import</div>
+      <label class="check"><input type="checkbox" id="set-fill-location"> Fill location from scene title (off by default)</label>
+      <div class="set-sec">Excel export</div>
+      <label class="check"><input type="checkbox" id="set-exp-good"> Include Good Selects sheet</label>
+      <label class="check"><input type="checkbox" id="set-exp-days"> Include Days stats sheet</label>
+    </div>
+    <div class="set-pane hidden" data-pane="system">
+      <div class="set-sec">Set mode (phone link)</div>
+      <label>Preferred port<input id="set-port" type="number" min="1024" max="65535" value="17831"></label>
+      <div class="set-sec">Updates</div>
+      <label class="check"><input type="checkbox" id="set-check-startup"> Check for updates on launch</label>
+      <div class="rowbtns"><button id="btn-check-updates" class="btn ghost">Check for updates</button></div>
+      <p class="tiny" id="update-status"></p>
+    </div>
     <div class="modal-actions">
       <button id="btn-defaults" class="btn ghost" title="Reset all settings to defaults">Restore defaults</button>
       <button id="btn-close-settings" class="btn primary">Done</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-shortcuts" class="modal hidden">
+  <div class="modal-card small" style="width:380px">
+    <h2>Keyboard shortcuts</h2>
+    <p class="tiny">Click a key, then press the replacement. Esc cancels. Ctrl/Cmd+Z undoes the last scene or project deletion.</p>
+    <div id="shortcut-rows"></div>
+    <div class="rowbtns" style="margin-top:10px"><button id="btn-shortcut-reset" class="btn ghost">Reset shortcuts</button></div>
+    <div class="modal-actions">
+      <button id="btn-close-shortcuts" class="btn primary">Done</button>
     </div>
   </div>
 </div>

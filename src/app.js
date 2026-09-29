@@ -27,6 +27,7 @@ const DEFAULT_SETTINGS = {
   defaultRating: "Good", defaultLens: "35", defaultIntExt: "INT", defaultCam: "",
   quickNotes: [...DEFAULT_QUICK], exportGood: true, exportDays: true,
   autoBump: true, setPort: 17831, checkStartup: true,
+  fillLocation: false,
   shortcuts: { ...DEFAULT_SHORTCUTS },
 };
 function loadSettings() {
@@ -47,16 +48,20 @@ function saveSettings() {
 const state = {
   projects: [], activeProjectId: null,
   scenes: [], takes: [], allTakes: [], setups: [], photos: [], activeId: null,
+  photoCounts: {}, photoLabels: [],
   rating: S.defaultRating, lens: S.defaultLens, takeIntExt: S.defaultIntExt, tags: new Set(),
   takeNo: 1, takeSetupId: null, lastDuration: 0, filter: "", projectQuery: "", editingSceneId: null, editingProjectId: null, editingTakeId: null, lightboxId: null,
+  pendingPosterKey: null, posterRemove: false,
 };
 let takeCam = "A";
 let timing = null, tickH = null;
 
 // In-app confirm (reliable inside the Tauri webview, unlike native dialogs).
-function confirmAsync(msg, okLabel = "Delete") {
+// force=true bypasses the settings toggle — used for project deletes which
+// always require a double check.
+function confirmAsync(msg, okLabel = "Delete", force = false) {
   return new Promise((resolve) => {
-    if (!S.confirmDelete) { resolve(true); return; }
+    if (!S.confirmDelete && !force) { resolve(true); return; }
     $("confirm-msg").textContent = msg;
     $("btn-confirm-ok").textContent = okLabel;
     $("modal-confirm").classList.remove("hidden");
@@ -135,7 +140,8 @@ function renderHome() {
     const d = document.createElement("div");
     d.className = "card-p";
     d.title = "Open project";
-    d.innerHTML = `<h3>${esc(p.film_name) || "Untitled film"}</h3>
+    d.innerHTML = `${p.poster ? `<img class="poster" alt="">` : ""}
+      <h3>${esc(p.film_name) || "Untitled film"}</h3>
       ${crew ? `<div class="crew">${crew}</div>` : ""}
       ${loc ? `<div class="crew">${loc}</div>` : ""}
       <div class="stats">Day ${p.shoot_day} · ${p.scene_count} scenes · ${p.take_count} takes · ${rate}% good</div>
@@ -146,6 +152,11 @@ function renderHome() {
         <button class="btn ghost" data-act="exp" title="Export to Excel">▦</button>
         <button class="btn ghost" data-act="del" title="Delete project">×</button>
       </div>`;
+    if (p.poster) {
+      invoke("project_poster_data", { projectId: p.id })
+        .then((src) => { const im = d.querySelector("img.poster"); if (im && src) im.src = src; })
+        .catch(() => {});
+    }
     d.onclick = async (e) => {
       const act = e.target.dataset?.act || "open";
       if (act === "open") { await openProject(p.id); return; }
@@ -273,11 +284,19 @@ function syncCamBtn() {
   if (b) b.textContent = `${takeCam} ✎`;
 }
 
+function setPosterPreview(src) {
+  const im = $("p-poster");
+  if (src) { im.src = src; im.classList.remove("none"); }
+  else { im.removeAttribute("src"); im.classList.add("none"); }
+}
+
 function openNewProject() {
   state.editingProjectId = null;
+  state.pendingPosterKey = null; state.posterRemove = false;
   $("project-modal-title").textContent = "New project";
   ["p-film","p-director","p-cameraop","p-location","p-unit"].forEach((id) => $(id).value = "");
   $("p-fps").value = "25";
+  setPosterPreview(null);
   $("modal-project").classList.remove("hidden");
 }
 
@@ -285,10 +304,17 @@ function openEditProject(p) {
   p = p || activeProject();
   if (!p) { toast("Create a project first"); return; }
   state.editingProjectId = p.id;
+  state.pendingPosterKey = null; state.posterRemove = false;
   $("project-modal-title").textContent = "Edit project";
   $("p-film").value = p.film_name; $("p-director").value = p.director; $("p-cameraop").value = p.camera_op;
   $("p-location").value = p.location; $("p-unit").value = p.unit;
   $("p-fps").value = String(p.fps ?? 25);
+  setPosterPreview(null);
+  if (p.poster) {
+    invoke("project_poster_data", { projectId: p.id })
+      .then((src) => { if (src) setPosterPreview(src); })
+      .catch(() => {});
+  }
   $("modal-project").classList.remove("hidden");
 }
 
@@ -303,16 +329,21 @@ async function saveProject() {
     shoot_day: state.editingProjectId ? (cur?.shoot_day ?? 1) : 1,
     total_days: state.editingProjectId ? (cur?.total_days ?? 1) : 1,
     camera_a: cur?.camera_a ?? "", camera_b: cur?.camera_b ?? "",
+    poster_stage: state.pendingPosterKey || null,
   };
   try {
     if (state.editingProjectId) {
       await invoke("update_project", { id: state.editingProjectId, project: p });
+      if (state.posterRemove && !state.pendingPosterKey) {
+        try { await invoke("remove_project_poster", { projectId: state.editingProjectId }); } catch { /* already gone */ }
+      }
       state.activeProjectId = state.editingProjectId;
     } else {
       const created = await invoke("create_project", { project: p });
       state.activeProjectId = created.id;
     }
   } catch (e) { toast("Save failed: " + e); return; }
+  state.pendingPosterKey = null; state.posterRemove = false;
   $("modal-project").classList.add("hidden");
   await loadProjects();
 }
@@ -320,11 +351,46 @@ async function saveProject() {
 async function deleteProject(p) {
   p = p || activeProject();
   if (!p) return;
-  if (!(await confirmAsync(`Delete project “${p.film_name}” + all ${p.scene_count} scenes and ${p.take_count} takes?`))) return;
+  // Projects always double-confirm, even when the settings toggle is off.
+  if (!(await confirmAsync(`Delete project “${p.film_name}” + all ${p.scene_count} scenes and ${p.take_count} takes?`, "Delete", true))) return;
+  if (!(await confirmAsync(`Really delete “${p.film_name}”? This cannot be undone (Ctrl+Z restores it right after).`, "Yes, delete", true))) return;
   try { await invoke("delete_project", { id: p.id }); } catch (e) { toast("Delete failed: " + e); return; }
   sndDelete();
   if (state.activeProjectId === p.id) { state.activeProjectId = null; state.activeId = null; }
   await loadProjects();
+  toast("Project deleted — Ctrl+Z to undo");
+}
+
+async function undoDelete() {
+  let r;
+  try {
+    r = await invoke("undo_delete");
+    sndClick();
+    toast(r.message || "Restored");
+  } catch (e) {
+    const m = String(e);
+    if (!m.includes("nothing to undo")) toast("Nothing to undo: " + m);
+    return;
+  }
+  await loadProjects();
+  // Re-select what was restored so the user lands back where they were.
+  if (r.kind === "project" && r.project_id) {
+    state.activeProjectId = r.project_id; state.activeId = null;
+    showView("app");
+    await loadScenes();
+  } else if (r.kind === "scene" && r.project_id) {
+    if (state.activeProjectId !== r.project_id) {
+      state.activeProjectId = r.project_id;
+      showView("app");
+    }
+    state.activeId = r.scene_id ?? state.activeId;
+    await loadScenes();
+    if (r.scene_id) state.activeId = r.scene_id;
+  } else if (state.activeProjectId) {
+    await loadScenes();
+  }
+  await loadAllTakes();
+  renderScenes(); renderHead(); refreshStats();
 }
 
 async function duplicateProject(p) {
@@ -349,10 +415,17 @@ async function loadScenes() {
 }
 
 async function loadAllTakes() {
-  if (!state.activeProjectId) { state.allTakes = []; renderTakes(); return; }
+  if (!state.activeProjectId) { state.allTakes = []; state.photoCounts = {}; renderTakes(); return; }
   try { state.allTakes = await invoke("list_project_takes", { projectId: state.activeProjectId }); }
   catch { state.allTakes = []; }
+  try {
+    const counts = await invoke("photo_counts", { projectId: state.activeProjectId });
+    state.photoCounts = {};
+    (counts || []).forEach((c) => { state.photoCounts[c.scene_id] = c.count; });
+  } catch { state.photoCounts = {}; }
   renderTakes();
+  // Scene rows show 📷 counts too — refresh them once counts land.
+  if ($("view-app") && !$("view-app").classList.contains("hidden")) renderScenes();
 }
 
 async function loadTakes() {
@@ -398,7 +471,9 @@ function renderScenes() {
   rows.forEach((s) => {
     const d = document.createElement("div");
     d.className = "scene" + (s.id === state.activeId ? " active" : "");
-    d.innerHTML = `<span class="num">${esc(s.number)}</span><div><div class="t">${esc(s.title) || "(untitled)"}</div><div class="m"><span class="badge">${esc(s.int_ext)}</span><span>${esc(s.daypart)} · Day ${s.day ?? 1} · ${s.take_count ?? 0} takes${s.location ? " · " + esc(s.location) : ""}${s.status && s.status !== "Not shot" ? " · " + esc(s.status) : ""}</span></div></div>
+    const st = s.status || "Not shot";
+    const photoN = state.photoCounts[s.id] || 0;
+    d.innerHTML = `<span class="scene-dot ${st}" title="${esc(st)}"></span><span class="num">${esc(s.number)}</span><div><div class="t">${esc(s.title) || "(untitled)"}</div><div class="m"><span class="badge">${esc(s.int_ext)}</span><span>${esc(s.daypart)} · Day ${s.day ?? 1} · ${s.take_count ?? 0} takes${photoN ? ` · 📷 ${photoN}` : ""}${s.location ? " · " + esc(s.location) : ""}${st !== "Not shot" ? " · " + esc(st) : ""}</span></div></div>
       <div class="row-actions"><button class="mini-btn" data-act="edit" title="Edit scene">✎</button><button class="mini-btn danger" data-act="del" title="Delete scene + its takes">×</button></div>`;
     d.onclick = async (e) => {
       const act = e.target.dataset?.act;
@@ -416,6 +491,7 @@ async function deleteScene(s) {
   sndDelete();
   if (state.activeId === s.id) state.activeId = null;
   await loadScenes();
+  toast("Scene deleted — Ctrl+Z to undo");
 }
 
 function openNewScene() {
@@ -457,7 +533,7 @@ function renderHead() {
   if (!s) { $("scene-head").innerHTML = `<p class="empty-hint">Select or create a scene to start logging.</p>`; return; }
   const p = activeProject();
   $("scene-head").innerHTML = `<h2><span class="n">${esc(s.number)}</span>${esc(s.int_ext)}. ${esc(s.title || "").toUpperCase()} - ${esc(s.daypart).toUpperCase()}<button class="scene-edit-btn" id="btn-edit-scene">✎ Edit</button><button class="status-btn ${esc(s.status || "Not shot").replace(" ", "")}" id="btn-status" title="Tap to cycle shoot status">${esc(s.status || "Not shot")}</button></h2>
-    <div class="meta"><span>Day ${s.day ?? "–"}</span>${s.location ? `<span>${esc(s.location)}</span>` : ""}<span>${state.takes.length} takes logged</span><span>Camera ${esc(s.camera_default) || "-"}</span></div>
+    <div class="meta plain"><span>Day ${s.day ?? "–"}</span>${s.location ? `<span>${esc(s.location)}</span>` : ""}<span>${state.takes.length} takes logged</span><span>Camera ${esc(s.camera_default) || "-"}</span></div>
     <p class="desc">${esc(s.description) || ""}</p>`;
   $("take-no").textContent = pad(state.takeNo);
   $("btn-edit-scene").onclick = () => openEditScene(s);
@@ -487,8 +563,11 @@ function renderTakes() {
   rows.forEach((t) => {
     const tr = document.createElement("tr");
     const dot = t.rating === "Good" ? "●" : t.rating === "Maybe" ? "◐" : "○";
+    const photoN = state.photoCounts[t.scene_id] || 0;
+    const photoCell = photoN ? `<span title="${photoN} still(s) on this scene">📷 ×${photoN} attached</span>` : `<span class="dim">—</span>`;
     tr.innerHTML = `<td><b>${esc(t.scene_number)}</b> <span class="dim">${esc(t.scene_title) || ""}</span></td><td>${esc(t.setup_name) || ""}</td><td>${t.day ?? ""}</td><td>${pad(t.take_no)}</td><td>${esc(t.tc_in)}${t.duration_sec > 0 ? `<br><span class="dim">${Math.round(t.duration_sec * 10) / 10}s</span>` : ""}</td><td>${esc(t.cam)}</td><td>${esc(t.int_ext)}</td><td>${esc(t.lens)}</td><td class="mono">${esc(t.cam_file) || ""}</td><td class="mono">${esc(t.audio_file) || ""}</td>
       <td><span class="pill ${t.rating}">${dot} ${esc(t.rating)}</span></td><td>${esc(t.tags) || ""}</td><td>${esc(t.note) || ""}</td>
+      <td>${photoCell}</td>
       <td class="rowbtns"><button class="mini-btn" data-act="edit" title="Edit take">✎</button><button class="del" title="Delete take">×</button></td>`;
     tr.querySelector('[data-act="edit"]').onclick = () => openEditTake(t);
     tr.querySelector(".del").onclick = async () => {
@@ -640,6 +719,7 @@ function renderPhotos() {
       sndDelete();
       if (state.lightboxId === p.id) { state.lightboxId = null; $("modal-lightbox").classList.add("hidden"); }
       await loadPhotos();
+      await loadAllTakes();
     };
     invoke("photo_data", { id: p.id, thumb: true })
       .then((src) => { const im = cell.querySelector("img"); if (im) im.src = src; })
@@ -654,6 +734,7 @@ async function addPhoto() {
     await invoke("add_photo", { sceneId: sc.id, setupId: state.takeSetupId });
     sndClick(); toast("Photo added");
     await loadPhotos();
+    await loadAllTakes();
   } catch (e) {
     if (!String(e).includes("cancelled")) toast("Photo failed: " + e);
   }
@@ -709,10 +790,11 @@ function renderProgress() {
   const p = activeProject(); if (!p) return;
   $("progress-sub").textContent = `${p.film_name || "Untitled film"} - wrap progress`;
   const days = [...new Set(state.scenes.map((s) => s.day ?? 1))].sort((a, b) => a - b);
-  const done = state.scenes.filter((s) => s.status === "Complete").length;
-  const pct = state.scenes.length ? Math.round((done * 100) / state.scenes.length) : 0;
+  const done = state.scenes.filter((s) => (s.status || "Not shot") === "Complete").length;
+  const total = state.scenes.length;
+  const pct = total ? Math.max(0, Math.min(100, Math.round((done * 100) / total))) : 0;
   const good = state.allTakes.filter((t) => t.rating === "Good").length;
-  let html = `<div class="meta"><span>${done}/${state.scenes.length} scenes complete</span><span>${state.allTakes.length} takes · ${good} good</span></div><div class="prog-bar"><i style="width:${pct}%"></i></div>`;
+  let html = `<div class="meta"><span>${done}/${total} scenes complete</span><span>${state.allTakes.length} takes · ${good} good</span></div><div class="prog-bar"><div class="prog-fill" id="prog-fill"></div></div><div class="prog-meta"><span>${pct}% wrapped</span><span>${total - done} remaining</span></div>`;
   days.forEach((d) => {
     html += `<div class="prog-day">Day ${d}</div>`;
     state.scenes
@@ -726,6 +808,10 @@ function renderProgress() {
   });
   if (!state.scenes.length) html += `<p class="empty-hint">No scenes yet.</p>`;
   $("progress-body").innerHTML = html;
+  // Set the fill via the DOM (not string interpolation) so an invalid value
+  // can never leave the fill at full width — it clamps to 0..100.
+  const fill = $("prog-fill");
+  if (fill) fill.style.width = `${pct}%`;
   document.querySelectorAll(".prog-row").forEach((r) => {
     r.onclick = async (e) => {
       const id = parseInt(r.dataset.id);
@@ -877,6 +963,7 @@ const ENTER_SUBMIT = {
   "modal-lens": "btn-save-lens",
   "modal-setup": "btn-save-setup",
   "modal-settings": "btn-close-settings",
+  "modal-shortcuts": "btn-close-shortcuts",
   "modal-confirm": "btn-confirm-ok",
   "modal-lightbox": "btn-lightbox-save",
 };
@@ -895,7 +982,7 @@ function submitOpenModal() {
 
 function closeTopModal() {
   // Topmost first: confirm floats above everything (z-index).
-  for (const mid of ["modal-confirm", "modal-lightbox", "modal-setup", "modal-lens", "modal-cam", "modal-take", "modal", "modal-project", "modal-settings", "modal-set"]) {
+  for (const mid of ["modal-confirm", "modal-shortcuts", "modal-lightbox", "modal-setup", "modal-lens", "modal-cam", "modal-take", "modal", "modal-project", "modal-settings", "modal-set"]) {
     const m = $(mid);
     if (m && !m.classList.contains("hidden")) {
       if (mid === "modal-confirm") { $("btn-confirm-cancel").click(); }
@@ -932,12 +1019,25 @@ $("btn-settings").onclick = () => {
   $("set-exp-good").checked = S.exportGood;
   $("set-exp-days").checked = S.exportDays;
   $("set-autobump").checked = S.autoBump;
+  $("set-fill-location").checked = !!S.fillLocation;
   $("set-port").value = S.setPort;
   $("set-check-startup").checked = S.checkStartup;
   $("update-status").textContent = "";
-  renderShortcutRows();
   $("modal-settings").classList.remove("hidden");
 };
+$("btn-open-shortcuts").onclick = () => {
+  renderShortcutRows();
+  $("modal-shortcuts").classList.remove("hidden");
+};
+$("btn-close-shortcuts").onclick = () => $("modal-shortcuts").classList.add("hidden");
+document.querySelectorAll("#set-tabs button").forEach((b) => {
+  b.onclick = () => {
+    document.querySelectorAll("#set-tabs button").forEach((x) => x.classList.toggle("on", x === b));
+    document.querySelectorAll(".set-pane").forEach((p) =>
+      p.classList.toggle("hidden", p.dataset.pane !== b.dataset.tab));
+    sndClick();
+  };
+});
 $("set-sound").onchange = (e) => {
   S.sounds = e.target.checked; saveSettings();
   if (S.sounds) sndClick();
@@ -963,6 +1063,7 @@ $("set-quick").onchange = (e) => {
 $("set-exp-good").onchange = (e) => { S.exportGood = e.target.checked; saveSettings(); };
 $("set-exp-days").onchange = (e) => { S.exportDays = e.target.checked; saveSettings(); };
 $("set-autobump").onchange = (e) => { S.autoBump = e.target.checked; saveSettings(); sndClick(); };
+$("set-fill-location").onchange = (e) => { S.fillLocation = e.target.checked; saveSettings(); sndClick(); };
 $("set-port").onchange = (e) => {
   const p = parseInt(e.target.value);
   S.setPort = p >= 1024 && p <= 65535 ? p : 17831;
@@ -1066,7 +1167,26 @@ async function openScriptImport() {
   try {
     const r = await invoke("import_screenplay_pdf");
     if (r.cancelled) { toast("Import cancelled"); return; }
-    fillScriptReview(r.scenes || [], r.warnings || []);
+    const scenes = r.scenes || [];
+    if (!scenes.length) throw new Error("No scenes found");
+    // Goal: point at a PDF and get scenes instantly — auto-create them.
+    // Review screen stays as the fallback when parsing fails.
+    const rows = scenes.map((s) => ({
+      number: s.number, title: s.title, int_ext: s.int_ext,
+      daypart: s.daypart,
+      location: S.fillLocation ? (s.location || s.title || "") : "",
+      setups: s.setups || [],
+    }));
+    try {
+      const done = await invoke("import_parsed_scenes", { projectId: state.activeProjectId, scenes: rows });
+      sndClick();
+      toast(`Imported ${done.imported} scenes + ${done.setups || 0} setups${done.duplicates ? ` (${done.duplicates} duplicates skipped)` : ""}${done.skipped ? `, ${done.skipped} rows skipped` : ""}`);
+      await loadScenes();
+      return;
+    } catch (e) {
+      // Auto-import failed (e.g. duplicates) — fall through to review.
+      fillScriptReview(scenes, r.warnings || []);
+    }
   } catch (e) {
     // Brittle PDF? Drop into paste mode — the parser works on any text.
     parsedScript = [];
@@ -1080,7 +1200,11 @@ async function openScriptImport() {
 }
 
 function fillScriptReview(scenes, warnings) {
-  parsedScript = scenes;
+  // Review fallback: honour the fill-location setting (default OFF keeps location empty).
+  parsedScript = (scenes || []).map((s) => ({
+    ...s,
+    location: S.fillLocation ? (s.location || s.title || "") : (s.location || ""),
+  }));
   if (!parsedScript.length) { toast("No scenes found"); return; }
   const nset = parsedScript.reduce((a, s) => a + (s.setups || []).length, 0);
   $("script-sub").textContent = `${parsedScript.length} scenes, ${nset} shot lines found - tick scenes to import; tick setups only for shots you want as setups (day defaults to 1)`;
@@ -1163,13 +1287,6 @@ $("btn-import").onclick = async () => {
     await loadScenes();
   } catch (e) { toast("Import failed: " + e); }
 };
-$("btn-template").onclick = async () => {
-  try {
-    const path = await invoke("write_template_csv");
-    sndClick();
-    toast(`Template saved → ${path}`);
-  } catch (e) { toast("Template failed: " + e); }
-};
 $("btn-add-setup").onclick = () => {
   if (!active()) { toast("Select a scene first"); return; }
   $("setup-input").value = "";
@@ -1191,11 +1308,41 @@ const saveCam = () => {
   $("modal-cam").classList.add("hidden");
   sndClick();
 };
+async function replaceCamAll() {
+  const v = $("cam-input").value.trim();
+  if (!v) { toast("Enter a camera first"); return; }
+  if (!state.activeProjectId) return;
+  if (!(await confirmAsync(`Replace camera on all ${state.scenes.length} scenes with “${v}”?`, "Replace all", false))) return;
+  try {
+    const r = await invoke("set_all_scene_cameras", { projectId: state.activeProjectId, camera: v });
+    takeCam = v; syncCamBtn();
+    $("modal-cam").classList.add("hidden");
+    sndClick();
+    toast(`Camera replaced on ${r.updated ?? state.scenes.length} scenes`);
+    await loadScenes();
+  } catch (e) { toast("Replace failed: " + e); }
+}
 $("btn-save-cam").onclick = saveCam;
+$("btn-replace-cam-all").onclick = replaceCamAll;
 $("btn-cam").onclick = openCamPopup;
 $("btn-cancel-cam").onclick = () => $("modal-cam").classList.add("hidden");
 seg("seg-rating", (v) => (state.rating = v));
-seg("seg-take-intext", (v) => (state.takeIntExt = v));
+// Take INT/EXT also persists to the scene so the header ("INT. TITLE - DAY")
+// updates instantly and stays in sync with what you log.
+async function persistTakeIntExt(v) {
+  const sc = active();
+  if (!sc || sc.int_ext === v) return;
+  const payload = {
+    number: sc.number, title: sc.title, int_ext: v, daypart: sc.daypart,
+    day: sc.day ?? 1, location: sc.location || "", status: sc.status || "Not shot",
+    description: sc.description, camera_default: sc.camera_default,
+  };
+  try { await invoke("update_scene", { id: sc.id, scene: payload }); }
+  catch (e) { toast("INT/EXT save failed: " + e); return; }
+  sc.int_ext = v;
+  renderScenes(); renderHead();
+}
+seg("seg-take-intext", (v) => { state.takeIntExt = v; persistTakeIntExt(v); });
 // lens presets + custom popup (presets untouched)
 document.querySelectorAll("#seg-lens button").forEach((b) => {
   b.onclick = () => {
@@ -1255,6 +1402,7 @@ $("btn-lightbox-del").onclick = async () => {
   state.lightboxId = null;
   $("modal-lightbox").classList.add("hidden");
   await loadPhotos();
+  await loadAllTakes();
 };
 $("btn-export").onclick = () => exportExcel();
 $("take-tc").oninput = (e) => liveTC(e.target);
@@ -1282,6 +1430,21 @@ $("btn-create").onclick = async () => {
 };
 $("btn-cancel-project").onclick = () => $("modal-project").classList.add("hidden");
 $("btn-save-project").onclick = saveProject;
+$("btn-poster-pick").onclick = async () => {
+  try {
+    const r = await invoke("pick_stage_poster");
+    if (r.cancelled) return;
+    state.pendingPosterKey = r.key; state.posterRemove = false;
+    const src = await invoke("staged_poster_data", { key: r.key });
+    setPosterPreview(src);
+    sndClick();
+  } catch (e) { toast("Poster failed: " + e); }
+};
+$("btn-poster-remove").onclick = () => {
+  state.pendingPosterKey = null; state.posterRemove = true;
+  setPosterPreview(null);
+  sndClick();
+};
 
 document.addEventListener("keydown", (e) => {
   // Remap capture has first dibs on every key.
@@ -1299,6 +1462,15 @@ document.addEventListener("keydown", (e) => {
     }
     capturing = null;
     renderShortcutRows();
+    return;
+  }
+  // Ctrl/Cmd+Z undoes the last scene or project deletion (works in inputs too,
+  // except while remapping — text undo still wins inside text fields).
+  if ((e.ctrlKey || e.metaKey) && e.code === "KeyZ" && !e.shiftKey) {
+    const tag = (e.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea") return; // let text undo win
+    e.preventDefault();
+    undoDelete();
     return;
   }
   if (e.key === "Escape") {
@@ -1331,3 +1503,43 @@ $("tc-now").textContent = nowTC();
 applySettingsToUI();
 loadProjects();
 if (S.checkStartup) setTimeout(() => checkForUpdates(false), 5000);
+
+// ---------- resizable scenes sidebar (drag the right edge, 200–520px, remembered) ----------
+(function initSidebarResize() {
+  const bar = document.querySelector("#view-app .sidebar");
+  const grip = $("sidebar-resize");
+  if (!bar || !grip) return;
+  try {
+    const w = parseInt(localStorage.getItem("slate-sidebar-w") || "");
+    if (w >= 200 && w <= 520) bar.style.width = w + "px";
+  } catch { /* fresh start */ }
+  grip.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    grip.classList.add("drag");
+    const x0 = e.clientX, w0 = bar.getBoundingClientRect().width;
+    const move = (m) => {
+      const w = Math.max(200, Math.min(520, Math.round(w0 + m.clientX - x0)));
+      bar.style.width = w + "px";
+    };
+    const up = (m) => {
+      move(m);
+      grip.classList.remove("drag");
+      try { localStorage.setItem("slate-sidebar-w", String(Math.round(bar.getBoundingClientRect().width))); } catch { /* ignore */ }
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  });
+})();
+
+// ---------- scroll isolation: a list/modal at its end must not scroll the page behind ----------
+// Single capture-phase handler covers re-rendered lists too (no listener pile-up).
+document.addEventListener("wheel", (e) => {
+  const el = e.target.closest?.("#scene-list, .modal-card, .table-wrap, .photo-grid");
+  if (!el) return;
+  const top = el.scrollTop <= 0;
+  const bottom = Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight - 1;
+  if ((top && e.deltaY < 0) || (bottom && e.deltaY > 0)) e.preventDefault();
+  e.stopPropagation();
+}, { passive: false, capture: true });
