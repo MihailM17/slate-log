@@ -12,6 +12,81 @@ pub struct ParsedScene {
     pub title: String,
     pub location: String,
     pub daypart: String,
+    pub setups: Vec<String>,
+}
+
+/// Camera directions: matched but never imported.
+const TRANSITIONS: &[&str] = &[
+    "DISSOLVE TO",
+    "CUT TO",
+    "FADE IN",
+    "FADE OUT",
+    "SMASH CUT",
+    "MATCH CUT",
+    "JUMP CUT",
+    "WIPE TO",
+    "IRIS IN",
+    "IRIS OUT",
+    "FLASH CUT",
+];
+
+/// Shot framings, longest first so `BIG CLOSE UP` wins over `CLOSE UP`.
+/// A line starting with one of these becomes a setup, not a scene.
+const SHOT_KEYWORDS: &[&str] = &[
+    "ESTABLISHING SHOT",
+    "OVER THE SHOULDER",
+    "FLASH CLOSE UP",
+    "EXTREME CLOSE UP",
+    "BIG CLOSE UP",
+    "TRACKING SHOT",
+    "AERIAL SHOT",
+    "CRANE SHOT",
+    "GROUP SHOT",
+    "TWO SHOT",
+    "MEDIUM SHOT",
+    "LONG SHOT",
+    "WIDE SHOT",
+    "FULL SHOT",
+    "CLOSE-UP",
+    "CLOSE UP",
+    "INSERT",
+    "MONTAGE",
+    "POV",
+    "ECU",
+    "MCU",
+    "OTS",
+    "MS",
+    "LS",
+    "WS",
+];
+
+fn boundary_ok(after: &str) -> bool {
+    after.is_empty() || after.starts_with([' ', '-', '.', '/', ':'])
+}
+
+/// Longest keyword with a hard boundary, if any.
+fn match_keyword<'a>(up: &'a str, words: &[&'a str]) -> Option<&'a str> {
+    let mut best: Option<&str> = None;
+    for w in words {
+        if let Some(rest) = up.strip_prefix(w) {
+            if boundary_ok(rest) && best.map(|b: &str| w.len() > b.len()).unwrap_or(true) {
+                best = Some(w);
+            }
+        }
+    }
+    best
+}
+
+/// Leading production number (`14`, `14.`, `2A`, `144`) off any line.
+fn strip_leading_number_text(t: &str) -> (String, &str) {
+    if let Some(i) = t.find(char::is_whitespace) {
+        let (head, tail) = t.split_at(i);
+        let h = head.trim_end_matches(['.', ')']);
+        if !h.is_empty() && h.chars().all(|c| c.is_ascii_digit() || c == 'A') {
+            return (h.to_string(), tail.trim_start());
+        }
+    }
+    (String::new(), t)
 }
 
 fn daypart_of(time: &str) -> &'static str {
@@ -40,16 +115,8 @@ fn parse_line(line: &str) -> Option<(ParsedScene, Vec<String>)> {
     }
     let up = t.to_uppercase();
     // Optional leading production scene number: `14`, `14.`, `1)`, `2A`.
-    let mut rest = up.as_str();
-    let mut number = String::new();
-    if let Some(i) = rest.find(char::is_whitespace) {
-        let (head, tail) = rest.split_at(i);
-        let head = head.trim_end_matches(['.', ')']);
-        if !head.is_empty() && head.chars().all(|c| c.is_ascii_digit() || c == 'A') {
-            number = head.to_string();
-            rest = tail.trim_start();
-        }
-    }
+    let (number, rest) = strip_leading_number_text(&up);
+    let mut rest = rest;
     // Transitions glued to the slug (`FADE IN: INT. ...`).
     for prefix in [
         "FADE IN:",
@@ -87,9 +154,17 @@ fn parse_line(line: &str) -> Option<(ParsedScene, Vec<String>)> {
     if !(after.is_empty() || after.starts_with(['.', ' ', '/'])) {
         return None;
     }
-    let after = after.trim_start_matches(['.', ' ', '/']).trim();
+    let mut after = after.trim_start_matches(['.', ' ', '/']).trim();
     if after.is_empty() {
         return None;
+    }
+    // `EXT. LONG SHOT - LOBBY` describes framing, not place.
+    if match_keyword(after, SHOT_KEYWORDS).is_some() {
+        let w = match_keyword(after, SHOT_KEYWORDS).unwrap();
+        after = after[w.len()..].trim_start_matches(['.', ' ', '-', '/']).trim();
+        if after.is_empty() {
+            return None;
+        }
     }
     // `LOCATION - TIME`: time is the last dash-separated chunk.
     let chunks: Vec<&str> = after.split(" - ").map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
@@ -116,18 +191,49 @@ fn parse_line(line: &str) -> Option<(ParsedScene, Vec<String>)> {
             title,
             location: orig_loc,
             daypart,
+            setups: Vec::new(),
         },
         warnings,
     ))
 }
 
+/// A camera-direction line (`MEDIUM SHOT - #7 AND #10`) becomes a setup
+/// name. Transitions (`DISSOLVE TO:`) and everything else return None.
+fn parse_shot_line(line: &str) -> Option<String> {
+    let norm: String = line.trim().replace('–', "-").replace('—', "-");
+    let t = norm.as_str();
+    if t.is_empty() || t.chars().any(|c| c.is_lowercase()) {
+        return None;
+    }
+    let up = t.to_uppercase();
+    let (_, rest) = strip_leading_number_text(&up);
+    if match_keyword(rest, TRANSITIONS).is_some() {
+        return None;
+    }
+    match_keyword(rest, SHOT_KEYWORDS)?;
+    // Name keeps the original casing, minus any leading page number.
+    Some(strip_leading_number_text(t).1.trim().to_string())
+}
+
 /// Parse a whole screenplay. Returns (scenes, warnings).
+/// Shot lines attach as setups to the most recent scene (or the first
+/// scene, for cold opens before any slug); transitions are dropped.
 pub fn parse_screenplay(text: &str) -> (Vec<ParsedScene>, Vec<String>) {
-    let mut scenes = Vec::new();
+    let mut scenes: Vec<ParsedScene> = Vec::new();
+    let mut pending: Vec<String> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
+    let push_setup = |scenes: &mut Vec<ParsedScene>, pending: &mut Vec<String>, name: String| {
+        if scenes.iter().any(|s| s.setups.iter().any(|x| x == &name)) || pending.contains(&name) {
+            return;
+        }
+        match scenes.last_mut() {
+            Some(s) => s.setups.push(name),
+            None => pending.push(name),
+        }
+    };
     for line in text.lines() {
         if let Some((mut s, w)) = parse_line(line) {
-            // Number bare slugs sequentially; numbered ones keep their numbers.
+            // Number bare slugs sequentially; numbered ones keep theirs.
             if s.number.is_empty() {
                 s.number = (scenes.len() + 1).to_string();
             }
@@ -137,6 +243,20 @@ pub fn parse_screenplay(text: &str) -> (Vec<ParsedScene>, Vec<String>) {
                     warnings.push(x);
                 }
             }
+        } else if let Some(name) = parse_shot_line(line) {
+            push_setup(&mut scenes, &mut pending, name);
+        }
+    }
+    if !pending.is_empty() {
+        match scenes.first_mut() {
+            Some(s) => {
+                for name in pending.drain(..) {
+                    if !s.setups.contains(&name) {
+                        s.setups.push(name);
+                    }
+                }
+            }
+            None => warnings.push("shot lines found but no scenes — nothing to attach them to".to_string()),
         }
     }
     (scenes, warnings)
@@ -166,6 +286,36 @@ mod tests {
     fn rejects_prose() {
         let (scenes, _) = parse_screenplay("The interior of the station.\nAn EXTREMELY loud noise.\ninterior monologue\n");
         assert!(scenes.is_empty());
+    }
+
+    #[test]
+    fn shot_script() {
+        // Shooting-script style: one slug, then bare shot lines.
+        let text = "1 EXT. LONG SHOT - N. Y. - COURT OF GENERAL SESSIONS - DAY 1\n\
+                    LONG SHOT - THE LOBBY\n\
+                    MEDIUM SHOT - #7 AND #10\n\
+                    DISSOLVE TO:\n\
+                    CLOSE UP - #8\n\
+                    144 MEDIUM SHOT - FOREMAN AND OTHERS 144\n\
+                    JUDGE\nPardon me.\n\
+                    12 ANGRY MEN\n";
+        let (scenes, _) = parse_screenplay(text);
+        assert_eq!(scenes.len(), 1);
+        assert_eq!(scenes[0].number, "1");
+        assert_eq!(scenes[0].int_ext, "EXT");
+        assert_eq!(scenes[0].location, "N. Y. - COURT OF GENERAL SESSIONS");
+        assert_eq!(scenes[0].daypart, "Day");
+        assert_eq!(scenes[0].setups.len(), 4);
+        assert!(scenes[0].setups[0].contains("LOBBY"));
+        assert!(scenes[0].setups[1].contains("#7 AND #10"));
+        assert!(scenes[0].setups[3].contains("FOREMAN"));
+    }
+
+    #[test]
+    fn orphan_shots_wait_for_first_scene() {
+        let (scenes, _) = parse_screenplay("CLOSE UP - HANDS\n2 INT. ROOM - NIGHT\n");
+        assert_eq!(scenes.len(), 1);
+        assert_eq!(scenes[0].setups, vec!["CLOSE UP - HANDS".to_string()]);
     }
 
     #[test]

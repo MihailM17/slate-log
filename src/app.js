@@ -1082,7 +1082,8 @@ async function openScriptImport() {
 function fillScriptReview(scenes, warnings) {
   parsedScript = scenes;
   if (!parsedScript.length) { toast("No scenes found"); return; }
-  $("script-sub").textContent = `${parsedScript.length} scenes found - uncheck or fix anything odd, then import (day defaults to 1)`;
+  const nset = parsedScript.reduce((a, s) => a + (s.setups || []).length, 0);
+  $("script-sub").textContent = `${parsedScript.length} scenes, ${nset} setups found - uncheck or fix anything odd, then import (day defaults to 1)`;
   $("script-warn").textContent = (warnings || []).join(" · ");
   $("script-notice").textContent = "";
   renderScriptReview();
@@ -1102,23 +1103,29 @@ function renderScriptReview() {
   const tb = $("script-body"); tb.innerHTML = "";
   parsedScript.forEach((s, i) => {
     const tr = document.createElement("tr");
+    const setupTip = (s.setups || []).join("\n");
+    const setupShort = (s.setups || []).length
+      ? `${(s.setups || []).length} (${(s.setups || []).slice(0, 2).join(", ")}${(s.setups || []).length > 2 ? ", …" : ""})`
+      : "—";
     tr.innerHTML = `<td><input type="checkbox" data-i="${i}" checked></td>
       <td><input data-f="number" data-i="${i}" value="${esc(s.number)}"></td>
       <td><input data-f="title" data-i="${i}" value="${esc(s.title)}"></td>
       <td><select data-f="int_ext" data-i="${i}"><option${s.int_ext === "INT" ? " selected" : ""}>INT</option><option${s.int_ext === "EXT" ? " selected" : ""}>EXT</option></select></td>
       <td><select data-f="daypart" data-i="${i}">${["Day", "Dusk", "Night", "Dawn"].map((d) => `<option${s.daypart === d ? " selected" : ""}>${d}</option>`).join("")}</select></td>
-      <td><input data-f="location" data-i="${i}" value="${esc(s.location)}"></td>`;
+      <td><input data-f="location" data-i="${i}" value="${esc(s.location)}"></td>
+      <td title="${esc(setupTip)}">${esc(setupShort)}</td>`;
     tb.appendChild(tr);
   });
 }
 
 async function importReviewedScript() {
-  const rows = [...document.querySelectorAll("#script-body tr")].map((tr) => {
+  const rows = [...document.querySelectorAll("#script-body tr")].map((tr, i) => {
     const get = (f) => tr.querySelector(`[data-f="${f}"]`).value;
     return {
       checked: tr.querySelector("input[type=checkbox]").checked,
       number: get("number"), title: get("title"), int_ext: get("int_ext"),
       daypart: get("daypart"), location: get("location"),
+      setups: parsedScript[i]?.setups || [],
     };
   }).filter((r) => r.checked);
   if (!rows.length) { toast("Nothing checked"); return; }
@@ -1128,7 +1135,7 @@ async function importReviewedScript() {
       scenes: rows.map(({ checked, ...s }) => s),
     });
     sndClick();
-    toast(`Imported ${r.imported} scenes${r.duplicates ? ` (${r.duplicates} duplicates skipped)` : ""}${r.skipped ? `, ${r.skipped} rows skipped` : ""}`);
+    toast(`Imported ${r.imported} scenes + ${r.setups || 0} setups${r.duplicates ? ` (${r.duplicates} duplicates skipped)` : ""}${r.skipped ? `, ${r.skipped} rows skipped` : ""}`);
     showView("app");
     await loadScenes();
   } catch (e) { toast("Import failed: " + e); }

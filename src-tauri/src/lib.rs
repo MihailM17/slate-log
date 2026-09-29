@@ -417,6 +417,8 @@ struct ScriptSceneIn {
     int_ext: String,
     daypart: String,
     location: String,
+    #[serde(default)]
+    setups: Vec<String>,
 }
 
 #[tauri::command]
@@ -428,7 +430,7 @@ fn import_parsed_scenes(app: AppHandle, project_id: i64, scenes: Vec<ScriptScene
         "Dusk" | "Night" | "Dawn" => v.to_string(),
         _ => "Day".to_string(),
     };
-    let (mut imported, mut duplicates, mut skipped) = (0, 0, 0);
+    let (mut imported, mut duplicates, mut skipped, mut setups) = (0, 0, 0, 0);
     for s in scenes {
         if s.number.trim().is_empty() {
             skipped += 1;
@@ -446,12 +448,19 @@ fn import_parsed_scenes(app: AppHandle, project_id: i64, scenes: Vec<ScriptScene
             camera_default: String::new(),
         };
         match db::insert_scene(&app, project_id, scene) {
-            Ok(_) => imported += 1,
+            Ok(created) => {
+                imported += 1;
+                for name in s.setups {
+                    if db::insert_setup(&app, created.id, name).is_ok() {
+                        setups += 1;
+                    }
+                }
+            }
             Err(e) if e.to_string().contains("already exists") => duplicates += 1,
             Err(_) => skipped += 1,
         }
     }
-    Ok(serde_json::json!({ "imported": imported, "duplicates": duplicates, "skipped": skipped }))
+    Ok(serde_json::json!({ "imported": imported, "duplicates": duplicates, "skipped": skipped, "setups": setups }))
 }
 
 #[tauri::command]
