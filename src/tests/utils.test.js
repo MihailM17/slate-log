@@ -67,9 +67,12 @@ describe("validTC", () => {
     assert.equal(validTC("12:34"), false);
     assert.equal(validTC("abc"), false);
     assert.equal(validTC("12:3:00"), false);
-    // NOTE: validTC only checks shape, not ranges — "12:99:00" passes here
-    // and is rejected later by the Rust TC parser (EDL skips it).
-    assert.equal(validTC("12:99:00"), true);
+  });
+
+  it("rejects out-of-range minutes and seconds", () => {
+    assert.equal(validTC("12:99:00"), false);
+    assert.equal(validTC("12:00:60"), false);
+    assert.equal(validTC("12:59:59"), true);
   });
 });
 

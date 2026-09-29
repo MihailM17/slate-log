@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { state, updateSettings, _reloadSettings } from "../store.js";
 import {
   active, activeProject, loadScenes, renderScenes, renderHead,
-  deleteScene, cycleStatus, stepDay, initScenes,
+  deleteScene, cycleStatus, stepDay, initScenes, scrollActiveSceneIntoView,
 } from "../features/scenes.js";
 import { installFakeDocument } from "./fakeDom.js";
 
@@ -240,6 +240,21 @@ describe("scene modal (new + save)", () => {
     assert.equal(call.args.projectId, 1);
     assert.equal(call.args.scene.title, "Dugout");
     assert.equal(state.activeId, 9);
+  });
+});
+
+describe("scrollActiveSceneIntoView", () => {
+  it("brings the active row into view without forcing full scroll", () => {
+    let seen = null;
+    doc.doc._query["#scene-list .scene.active"] = {
+      scrollIntoView: (opts) => { seen = opts; },
+    };
+    scrollActiveSceneIntoView();
+    assert.deepEqual(seen, { block: "nearest" });
+  });
+
+  it("is a no-op when nothing is selected", () => {
+    assert.doesNotThrow(() => scrollActiveSceneIntoView());
   });
 });
 

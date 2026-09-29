@@ -67,7 +67,9 @@ export function installFakeDocument() {
     },
     createTextNode: (text) => ({ textContent: text }),
     querySelectorAll: () => [],
-    querySelector: () => null,
+    // Tests can register single-element results: doc._query[selector] = el.
+    _query: {},
+    querySelector(sel) { return this._query[sel] ?? null; },
     addEventListener() {},
     removeEventListener() {},
     _byId: byId,

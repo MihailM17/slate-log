@@ -8,7 +8,7 @@ import {
   initTakes, loadTakes, logTake, renderChips, syncLensSeg,
 } from "./features/takes.js";
 import {
-  loadScenes, renderScenes, renderHead, openNewScene,
+  loadScenes, renderScenes, renderHead, openNewScene, scrollActiveSceneIntoView,
 } from "./features/scenes.js";
 import { initPhotos, loadPhotos } from "./features/photos.js";
 import { initProjects, loadProjects, undoDelete } from "./features/projects.js";
@@ -110,7 +110,7 @@ document.addEventListener("keydown", (e) => {
   else if (e.code === (S.shortcuts.nextScene || "ArrowDown") || e.code === (S.shortcuts.prevScene || "ArrowUp")) {
     const i = state.scenes.findIndex((s) => s.id === state.activeId);
     const n = e.code === (S.shortcuts.nextScene || "ArrowDown") ? i + 1 : i - 1;
-    if (state.scenes[n]) { state.activeId = state.scenes[n].id; loadTakes().then(() => { renderScenes(); renderHead(); pushSceneToServer(); }); }
+    if (state.scenes[n]) { state.activeId = state.scenes[n].id; loadTakes().then(() => { renderScenes(); renderHead(); pushSceneToServer(); scrollActiveSceneIntoView(); }); }
   }
 });
 

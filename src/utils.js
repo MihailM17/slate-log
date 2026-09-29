@@ -20,7 +20,9 @@ export const fmtDur = (s) => `${pad(Math.floor(s / 60))}:${pad(Math.floor(s % 60
 
 export const fmtLens = (v) => (/mm\s*$/i.test(v.trim()) ? v.trim() : v.trim() + "mm");
 
-export const validTC = (v) => /^\d{1,2}:\d{2}:\d{2}$/.test(v.trim());
+// Shape + ranges: hours can run long on multi-day shoots, minutes/seconds
+// must be real clock values (the EDL writer rejects the rest downstream).
+export const validTC = (v) => /^\d{1,2}:[0-5]\d:[0-5]\d$/.test(v.trim());
 
 // Bump trailing run of digits, keeping padding and extension: C0004.MP4 -> C0005.MP4
 export const bumpName = (v) => {

@@ -235,6 +235,106 @@ fn photo_cell_for_take(t: &TakeWithScene, photo_labels: &[PhotoLabel]) -> String
     s
 }
 
+#[cfg(test)]
+mod export_tests {
+    use super::*;
+    use crate::db::{PhotoLabel, Scene, TakeWithScene};
+
+    fn temp_path(tag: &str, ext: &str) -> String {
+        let p = std::env::temp_dir().join(format!(
+            "slate-export-test-{}-{}-{}.{}",
+            std::process::id(),
+            chrono::Local::now().format("%Y%m%d%H%M%S%f"),
+            tag,
+            ext
+        ));
+        p.to_string_lossy().to_string()
+    }
+
+    fn scene() -> Scene {
+        Scene {
+            id: 5, project_id: 1, number: "14".to_string(), title: "Meadow".to_string(),
+            int_ext: "EXT".to_string(), daypart: "Day".to_string(), day: 2,
+            location: "".to_string(), status: "Complete".to_string(), description: "".to_string(),
+            camera_default: "A".to_string(), take_count: 2,
+        }
+    }
+
+    fn take(no: i64, rating: &str, tc: &str) -> TakeWithScene {
+        TakeWithScene {
+            id: no, scene_id: 5, scene_number: "14".to_string(), scene_title: "Meadow".to_string(),
+            take_no: no, tc_in: tc.to_string(), cam: "A".to_string(), lens: "35mm".to_string(),
+            rating: rating.to_string(), int_ext: "EXT".to_string(), day: 2, duration_sec: 5.0,
+            cam_file: "C0004.MP4".to_string(), audio_file: "".to_string(), setup_id: None,
+            setup_name: "".to_string(), tags: "".to_string(), note: "".to_string(),
+            created_at: "".to_string(),
+        }
+    }
+
+    #[test]
+    fn tc_round_trip() {
+        assert_eq!(parse_tc("10:00:00"), Some((10, 0, 0, 0)));
+        assert_eq!(parse_tc("nope"), None);
+        // 1 frame at 25fps forward and back.
+        let f = tc_to_frames("01:00:00:00", 25.0).unwrap();
+        assert_eq!(frames_to_tc(f, 25.0), "01:00:00:00");
+        assert_eq!(frames_to_tc(f + 1.0, 25.0), "01:00:00:01");
+    }
+
+    #[test]
+    fn edl_selects_only_good_takes() {
+        let takes = vec![take(1, "Good", "10:00:00"), take(2, "Bad", "10:05:00"), take(3, "Good", "bogus")];
+        let path = temp_path("selects", "edl");
+        let (events, skipped) = write_edl(&path, "film", 25.0, &takes).unwrap();
+        assert_eq!((events, skipped), (1, 1));
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("TITLE: film SELECTS"));
+        assert!(text.contains("FROM CLIP NAME: C0004.MP4"));
+        assert_eq!(text.matches("FROM CLIP NAME").count(), 1);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn workbook_writes_all_sheets() {
+        let sc = scene();
+        let grouped = vec![(sc.clone(), vec![take(1, "Good", "10:00:00"), take(2, "Bad", "10:05:00")])];
+        let photos = vec![PhotoLabel {
+            scene_id: 5, setup_id: None, filename: "m.jpg".to_string(), caption: "Hat".to_string(),
+        }];
+        let path = temp_path("book", "xlsx");
+        write_workbook(&path, &[sc], &grouped, &photos, true, true).unwrap();
+        let meta = std::fs::metadata(&path).unwrap();
+        assert!(meta.len() > 4000, "workbook should have real content");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn photo_cells_prefer_matching_setup() {
+        let labels = vec![
+            PhotoLabel { scene_id: 5, setup_id: Some(2), filename: "a.jpg".to_string(), caption: "".to_string() },
+            PhotoLabel { scene_id: 5, setup_id: None, filename: "b.jpg".to_string(), caption: "Whole".to_string() },
+        ];
+        let mut t = take(1, "Good", "10:00:00");
+        t.setup_id = Some(2);
+        let cell = photo_cell_for_take(&t, &labels);
+        assert!(cell.contains("2 attached"), "{cell}");
+        t.setup_id = Some(9); // unknown setup falls back to whole-scene stills
+        let cell = photo_cell_for_take(&t, &labels);
+        assert_eq!(cell, "1 attached (Whole)");
+        t.setup_id = None;
+        t.scene_id = 99;
+        assert_eq!(photo_cell_for_take(&t, &labels), "");
+    }
+
+    #[test]
+    fn pdf_daily_log_writes_a_file() {
+        let path = temp_path("day", "pdf");
+        write_pdf(&path, "Film", "Dir", "Field", 2, &[scene()], &[take(1, "Good", "10:00:00")]).unwrap();
+        assert!(std::fs::metadata(&path).unwrap().len() > 1000);
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
 fn write_take_row(
     ws: &mut rust_xlsxwriter::Worksheet,
     row: u32,

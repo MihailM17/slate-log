@@ -62,6 +62,13 @@ export async function stepDay(delta) {
   renderProjectHeader(); renderHead();
 }
 
+// Keep keyboard navigation visible: after the active scene moves, bring it
+// into view inside the sidebar list (nearest = no-op when already visible).
+export function scrollActiveSceneIntoView() {
+  const el = document.querySelector("#scene-list .scene.active");
+  if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
+}
+
 export function renderScenes() {
   const q = state.filter.toLowerCase();
   const list = $("scene-list"); list.innerHTML = "";

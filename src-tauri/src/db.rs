@@ -58,7 +58,7 @@ pub struct Scene {
     pub take_count: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Take {
     pub id: i64,
     pub scene_id: i64,
@@ -101,7 +101,7 @@ pub struct TakeWithScene {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Setup {
     pub id: i64,
     pub scene_id: i64,
@@ -320,6 +320,8 @@ fn migrate_orphans(conn: &Connection) -> rusqlite::Result<()> {
 pub fn ensure_schema(app: &AppHandle) {
     // Back up first so a failed migration can never eat the shoot.
     backup_db(app);
+    // Reload trash so Ctrl+Z survives restarts.
+    load_trash(app);
     if let Ok(conn) = connect(app) {
         // Touch tables so fresh installs start with empty projects/scenes.
         let _ : rusqlite::Result<i64> = conn.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get(0));
@@ -430,7 +432,7 @@ pub fn update_project(app: &AppHandle, id: i64, p: NewProject) -> rusqlite::Resu
 
 pub fn remove_project(app: &AppHandle, id: i64) -> rusqlite::Result<()> {
     if let Some(bundle) = capture_project_bundle(app, id) {
-        push_undo(UndoItem::Project(bundle));
+        push_undo_persistent(app, UndoItem::Project(bundle));
     }
     let conn = connect(app)?;
     // Drop photo files first (rows go with the scenes below).
@@ -670,7 +672,7 @@ pub fn update_scene(app: &AppHandle, id: i64, s: NewScene) -> rusqlite::Result<(
 pub fn remove_scene(app: &AppHandle, id: i64) -> rusqlite::Result<()> {
     // Snapshot for Ctrl+Z before anything is destroyed.
     if let Some(bundle) = capture_scene_bundle(app, id) {
-        push_undo(UndoItem::Scene(bundle));
+        push_undo_persistent(app, UndoItem::Scene(bundle));
     }
     let conn = connect(app)?;
     let project_id: i64 = conn.query_row("SELECT project_id FROM scenes WHERE id=?1", params![id], |r| r.get(0)).unwrap_or(0);
@@ -1252,7 +1254,22 @@ pub fn set_all_scene_cameras(app: &AppHandle, project_id: i64, camera: String) -
 
 // ---------- Undo (Ctrl+Z) for scene / project deletes ----------
 
-#[derive(Debug, Clone)]
+/// Base64 for byte blobs: JSON arrays of numbers would bloat stills ~3x.
+mod b64 {
+    use base64::Engine as _;
+    use serde::Deserialize;
+    pub fn serialize<S: serde::Serializer>(v: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&base64::engine::general_purpose::STANDARD.encode(v))
+    }
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let text = String::deserialize(d)?;
+        base64::engine::general_purpose::STANDARD
+            .decode(text)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct PhotoBackup {
     id: i64,
     scene_id: i64,
@@ -1260,11 +1277,13 @@ struct PhotoBackup {
     filename: String,
     caption: String,
     created_at: String,
+    #[serde(with = "b64")]
     full_bytes: Vec<u8>,
+    #[serde(with = "b64")]
     thumb_bytes: Vec<u8>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct SceneBundle {
     id: i64,
     project_id: i64,
@@ -1280,9 +1299,12 @@ struct SceneBundle {
     takes: Vec<Take>,
     setups: Vec<Setup>,
     photos: Vec<PhotoBackup>,
+    /// Disk key of the trash file (never serialized — it comes from the filename).
+    #[serde(skip)]
+    trash_key: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct ProjectBundle {
     id: i64,
     film_name: String,
@@ -1296,11 +1318,15 @@ struct ProjectBundle {
     camera_a: String,
     camera_b: String,
     poster: String,
+    #[serde(with = "b64")]
     poster_bytes: Vec<u8>,
     scenes: Vec<SceneBundle>,
+    /// Disk key of the trash file (never serialized — it comes from the filename).
+    #[serde(skip)]
+    trash_key: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 enum UndoItem {
     Scene(SceneBundle),
     Project(ProjectBundle),
@@ -1316,6 +1342,117 @@ fn push_undo(item: UndoItem) {
         s.push(item);
         while s.len() > 20 {
             s.remove(0);
+        }
+    }
+}
+
+// ---------- Persistent trash: undo survives restarts ----------
+//
+// Every pushed bundle is also written to <app_data>/trash/ as one JSON file
+// (stills/poster as base64). On launch the files are loaded back into the
+// in-memory stack, so Ctrl+Z works across restarts. Newest 10 kept.
+
+fn trash_dir(app: &AppHandle) -> PathBuf {
+    let dir = db_path(app);
+    let base = dir.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+    base.join("trash")
+}
+
+fn trash_key_for(item: &UndoItem) -> String {
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let (kind, id) = match item {
+        UndoItem::Scene(b) => ("scene", b.id),
+        UndoItem::Project(b) => ("project", b.id),
+    };
+    format!(
+        "{}-{}-{}-{}",
+        unique_stem(),
+        N.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        kind,
+        id
+    )
+}
+
+fn trash_save(dir: &std::path::Path, item: &UndoItem) -> Option<String> {
+    if std::fs::create_dir_all(dir).is_err() {
+        return None;
+    }
+    let key = trash_key_for(item);
+    let data = serde_json::to_vec(item).ok()?;
+    std::fs::write(dir.join(format!("{key}.json")), data).ok()?;
+    trash_prune(dir);
+    Some(key)
+}
+
+fn trash_load(dir: &std::path::Path) -> Vec<(String, UndoItem)> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .filter(|n| n.ends_with(".json"))
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    let mut out = Vec::new();
+    for n in names {
+        let key = n.trim_end_matches(".json").to_string();
+        let item: Option<UndoItem> = std::fs::read(dir.join(&n))
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok());
+        if let Some(item) = item {
+            out.push((key, item));
+        }
+    }
+    out
+}
+
+fn trash_remove(dir: &std::path::Path, key: &str) {
+    let _ = std::fs::remove_file(dir.join(format!("{key}.json")));
+}
+
+fn trash_prune(dir: &std::path::Path) {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .filter(|n| n.ends_with(".json"))
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    while names.len() > 10 {
+        let old = names.remove(0);
+        let _ = std::fs::remove_file(dir.join(old));
+    }
+}
+
+/// Push with a trash-file backup. A full disk never blocks the delete itself.
+fn push_undo_persistent(app: &AppHandle, mut item: UndoItem) {
+    let key = trash_save(&trash_dir(app), &item);
+    match &mut item {
+        UndoItem::Scene(b) => b.trash_key = key,
+        UndoItem::Project(b) => b.trash_key = key,
+    }
+    push_undo(item);
+}
+
+/// Load trash files into the in-memory stack (called once at launch).
+fn load_trash(app: &AppHandle) {
+    let loaded = trash_load(&trash_dir(app));
+    if loaded.is_empty() {
+        return;
+    }
+    if let Ok(mut s) = undo_stack().lock() {
+        for (key, mut item) in loaded {
+            match &mut item {
+                UndoItem::Scene(b) => b.trash_key = Some(key),
+                UndoItem::Project(b) => b.trash_key = Some(key),
+            }
+            s.push(item);
+            while s.len() > 20 {
+                s.remove(0);
+            }
         }
     }
 }
@@ -1363,6 +1500,7 @@ fn capture_scene_bundle(app: &AppHandle, scene_id: i64) -> Option<SceneBundle> {
         takes,
         setups,
         photos,
+        trash_key: None,
     })
 }
 
@@ -1397,6 +1535,7 @@ fn capture_project_bundle(app: &AppHandle, project_id: i64) -> Option<ProjectBun
         poster,
         poster_bytes,
         scenes: bundles,
+        trash_key: None,
     })
 }
 
@@ -1464,6 +1603,9 @@ pub fn undo_last_delete(app: &AppHandle) -> rusqlite::Result<UndoResult> {
                 return Err(rusqlite::Error::InvalidParameterName(format!("cannot undo — scene {} already exists", b.number)));
             }
             insert_scene_bundle(&conn, app, &b)?;
+            if let Some(key) = b.trash_key.as_deref() {
+                trash_remove(&trash_dir(app), key);
+            }
             Ok(UndoResult {
                 message: format!("Scene {} restored", b.number),
                 kind: "scene".to_string(),
@@ -1487,6 +1629,9 @@ pub fn undo_last_delete(app: &AppHandle) -> rusqlite::Result<UndoResult> {
             for s in &b.scenes {
                 insert_scene_bundle(&conn, app, s)?;
             }
+            if let Some(key) = b.trash_key.as_deref() {
+                trash_remove(&trash_dir(app), key);
+            }
             Ok(UndoResult {
                 message: format!("Project “{}” restored", b.film_name),
                 kind: "project".to_string(),
@@ -1499,4 +1644,93 @@ pub fn undo_last_delete(app: &AppHandle) -> rusqlite::Result<UndoResult> {
 
 pub fn undo_available() -> bool {
     undo_stack().lock().map(|s| !s.is_empty()).unwrap_or(false)
+}
+
+#[cfg(test)]
+mod trash_tests {
+    use super::*;
+
+    fn temp_trash(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "slate-trash-test-{}-{}-{}",
+            std::process::id(),
+            unique_stem(),
+            tag
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    fn sample_scene_bundle() -> SceneBundle {
+        SceneBundle {
+            id: 5,
+            project_id: 1,
+            number: "14".to_string(),
+            title: "Meadow".to_string(),
+            int_ext: "EXT".to_string(),
+            daypart: "Day".to_string(),
+            day: 2,
+            location: "".to_string(),
+            status: "Complete".to_string(),
+            description: "".to_string(),
+            camera_default: "A".to_string(),
+            takes: vec![Take {
+                id: 11, scene_id: 5, take_no: 3, tc_in: "10:00:00".to_string(),
+                cam: "A".to_string(), lens: "35mm".to_string(), rating: "Good".to_string(),
+                int_ext: "EXT".to_string(), day: 2, duration_sec: 4.5,
+                cam_file: "C0004.MP4".to_string(), audio_file: "".to_string(),
+                setup_id: Some(2), tags: "Clean take".to_string(), note: "".to_string(),
+                created_at: "2026-01-01 10:00:00".to_string(),
+            }],
+            setups: vec![Setup { id: 2, scene_id: 5, name: "Wide".to_string(), take_count: 1 }],
+            photos: vec![PhotoBackup {
+                id: 3, scene_id: 5, setup_id: None, filename: "m.jpg".to_string(),
+                caption: "Hat".to_string(), created_at: "2026-01-01 10:01:00".to_string(),
+                full_bytes: vec![0, 1, 2, 250, 255, 13, 37],
+                thumb_bytes: vec![9, 8, 7],
+            }],
+            trash_key: None,
+        }
+    }
+
+    #[test]
+    fn trash_round_trip_preserves_everything() {
+        let dir = temp_trash("roundtrip");
+        let item = UndoItem::Scene(sample_scene_bundle());
+        let key = trash_save(&dir, &item).expect("save");
+        let loaded = trash_load(&dir);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].0, key);
+        assert_eq!(loaded[0].1, item);
+        // Photo bytes survive as exact bytes (base64, not lossy).
+        match &loaded[0].1 {
+            UndoItem::Scene(b) => assert_eq!(b.photos[0].full_bytes, vec![0, 1, 2, 250, 255, 13, 37]),
+            _ => panic!("wrong kind"),
+        }
+        trash_remove(&dir, &key);
+        assert!(trash_load(&dir).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn trash_prune_keeps_newest_10() {
+        let dir = temp_trash("prune");
+        for _ in 0..12 {
+            trash_save(&dir, &UndoItem::Scene(sample_scene_bundle()));
+        }
+        assert_eq!(trash_load(&dir).len(), 10);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn trash_skips_corrupt_files() {
+        let dir = temp_trash("corrupt");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("zzz-scene-1.json"), b"{oops").unwrap();
+        trash_save(&dir, &UndoItem::Scene(sample_scene_bundle()));
+        // "zzz…" sorts after real keys, corrupt entry skipped, good one loads.
+        let loaded = trash_load(&dir);
+        assert_eq!(loaded.len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
