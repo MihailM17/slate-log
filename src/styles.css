@@ -99,6 +99,9 @@ input.invalid{border-color:#e0705c!important}
 .modal-card.wide{width:640px}
 #script-body input[type=text],#script-body input:not([type]),#script-body select{background:#141312;border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:7px;width:100%}
 #script-body input[type=checkbox]{width:auto;accent-color:var(--rust)}
+#script-paste-wrap{margin:10px 0 14px;color:var(--mut)}
+#script-paste-wrap summary{cursor:pointer;color:var(--txt)}
+#script-paste{width:100%;margin-top:8px;background:#141312;border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:10px;font:13px/1.5 Inter,system-ui,sans-serif}
 .modal{z-index:40}
 #modal-confirm{z-index:60}
 .toast{z-index:100}

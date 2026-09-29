@@ -1061,16 +1061,41 @@ let parsedScript = [];
 
 async function openScriptImport() {
   if (!state.activeProjectId) { toast("Open a project first"); return; }
+  $("script-notice").textContent = "";
+  $("script-paste-wrap").open = false;
   try {
     const r = await invoke("import_screenplay_pdf");
     if (r.cancelled) { toast("Import cancelled"); return; }
-    parsedScript = r.scenes || [];
-    if (!parsedScript.length) { toast("No scenes found"); return; }
-    $("script-sub").textContent = `${parsedScript.length} scenes found — uncheck or fix anything odd, then import (day defaults to 1)`;
-    $("script-warn").textContent = (r.warnings || []).join(" · ");
+    fillScriptReview(r.scenes || [], r.warnings || []);
+  } catch (e) {
+    // Brittle PDF? Drop into paste mode — the parser works on any text.
+    parsedScript = [];
     renderScriptReview();
+    $("script-sub").textContent = "That PDF would not read - paste the script text below instead";
+    $("script-notice").textContent = String(e);
+    $("script-warn").textContent = "";
+    $("script-paste-wrap").open = true;
     showView("script");
-  } catch (e) { toast("Script import failed: " + e); }
+  }
+}
+
+function fillScriptReview(scenes, warnings) {
+  parsedScript = scenes;
+  if (!parsedScript.length) { toast("No scenes found"); return; }
+  $("script-sub").textContent = `${parsedScript.length} scenes found - uncheck or fix anything odd, then import (day defaults to 1)`;
+  $("script-warn").textContent = (warnings || []).join(" · ");
+  $("script-notice").textContent = "";
+  renderScriptReview();
+  showView("script");
+}
+
+async function parseScriptPaste() {
+  const text = $("script-paste").value;
+  try {
+    const r = await invoke("parse_screenplay_text", { text });
+    if (r.cancelled) return;
+    fillScriptReview(r.scenes || [], r.warnings || []);
+  } catch (e) { toast("Parse failed: " + e); }
 }
 
 function renderScriptReview() {
@@ -1113,6 +1138,7 @@ async function importReviewedScript() {
 $("btn-script").onclick = openScriptImport;
 $("btn-script-back").onclick = () => showView("app");
 $("btn-script-import").onclick = importReviewedScript;
+$("btn-script-parse").onclick = parseScriptPaste;
 $("btn-report").onclick = openReport;
 $("btn-report-back").onclick = () => showView("app");
 $("report-day").onchange = renderReport;

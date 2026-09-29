@@ -359,9 +359,49 @@ async fn import_screenplay_pdf(app: AppHandle) -> Result<serde_json::Value, Stri
     if bytes.len() > 50_000_000 {
         return Err("PDF is too large (50MB max)".into());
     }
-    let text = pdf_extract::extract_text_from_mem(&bytes).map_err(|e| e.to_string())?;
+    let text = extract_script_text(&path, &bytes)?;
     if text.trim().len() < 50 {
-        return Err("No readable text found — scanned/image PDFs need OCR first".into());
+        return Err("No readable text found — scanned/image PDFs need OCR first, or paste the text below".into());
+    }
+    let (scenes, warnings) = script::parse_screenplay(&text);
+    if scenes.is_empty() {
+        return Err("No scene headings found (looked for INT./EXT. slugs) — or paste the text below".into());
+    }
+    Ok(serde_json::json!({ "cancelled": false, "scenes": scenes, "warnings": warnings }))
+}
+
+/// PDF text the tolerant way: macOS Quartz (via textutil) reads the
+/// malformed files strict parsers reject; pdf-extract covers the rest.
+fn extract_script_text(path: &std::path::Path, bytes: &[u8]) -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(out) = std::process::Command::new("/usr/bin/textutil")
+            .args(["-convert", "txt", "-stdout", "-encoding", "UTF-8"])
+            .arg(path)
+            .output()
+        {
+            if out.status.success() {
+                let t = String::from_utf8_lossy(&out.stdout).to_string();
+                if t.trim().len() >= 50 {
+                    return Ok(t);
+                }
+            }
+        }
+    }
+    pdf_extract::extract_text_from_mem(bytes).map_err(|e| {
+        let m = e.to_string();
+        if m.contains("cross-reference") || m.contains("xref") {
+            "PDF structure is damaged (bad cross-reference table) — paste the text below instead".to_string()
+        } else {
+            m
+        }
+    })
+}
+
+#[tauri::command]
+fn parse_screenplay_text(text: String) -> Result<serde_json::Value, String> {
+    if text.trim().len() < 10 {
+        return Err("paste some script text first".into());
     }
     let (scenes, warnings) = script::parse_screenplay(&text);
     if scenes.is_empty() {
@@ -536,6 +576,7 @@ pub fn run() {
             import_scenes_csv,
             write_template_csv,
             import_screenplay_pdf,
+            parse_screenplay_text,
             import_parsed_scenes,
             list_takes,
             list_project_takes,
