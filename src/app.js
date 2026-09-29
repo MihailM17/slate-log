@@ -56,6 +56,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (v) =>
   String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const pad = (n) => String(n).padStart(2, "0");
+const CAM_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>';
 const nowTC = () => { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
 const activeProject = () => state.projects.find((p) => p.id === state.activeProjectId);
 const active = () => state.scenes.find((s) => s.id === state.activeId);
@@ -603,10 +604,9 @@ function renderPhotos() {
   const w = $("photos");
   const sc = active();
   if (!sc) { w.innerHTML = ""; return; }
-  w.innerHTML = `<div class="photos-head"><strong>Continuity stills</strong><span>${state.photos.length}</span><button id="btn-add-photo" class="addphoto" title="Import a still into this scene">+ Add photo</button><span class="camwrap"><span class="dim">Camera</span> <button id="btn-cam" class="btn ghost" title="Change camera for this take">A</button></span></div><div class="photo-grid" id="photo-grid"></div>`;
+  w.innerHTML = `<div class="photos-head"><strong>Continuity stills</strong><span>${state.photos.length}</span><button id="btn-add-photo" class="addphoto" title="Import a still into this scene">+ Add photo</button><span class="camwrap"><button id="btn-set" class="btn ghost iconbtn" title="Set mode: phones on this WiFi push stills + takes live">${CAM_SVG} Set</button></span></div><div class="photo-grid" id="photo-grid"></div>`;
   $("btn-add-photo").onclick = addPhoto;
-  $("btn-cam").onclick = openCamPopup;
-  syncCamBtn();
+  $("btn-set").onclick = openSetMode;
   const g = $("photo-grid");
   state.photos.forEach((p) => {
     const cell = document.createElement("div");
@@ -828,7 +828,7 @@ function applySettingsToUI() {
   $("tc-now").style.display = S.manualTC ? "none" : "";
   renderChips();
 }
-$("btn-set").onclick = openSetMode;
+// (btn-set lives in the stills header and is wired in renderPhotos)
 $("btn-close-set").onclick = () => closeSetMode();
 $("btn-settings").onclick = () => {
   $("set-sound").checked = S.sounds;
@@ -1005,6 +1005,7 @@ const saveCam = () => {
   sndClick();
 };
 $("btn-save-cam").onclick = saveCam;
+$("btn-cam").onclick = openCamPopup;
 $("btn-cancel-cam").onclick = () => $("modal-cam").classList.add("hidden");
 $("cam-input").onkeydown = (e) => { if (e.key === "Enter") saveCam(); };
 seg("seg-rating", (v) => (state.rating = v));
