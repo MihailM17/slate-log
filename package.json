@@ -3,10 +3,11 @@
   "version": "0.7.0",
   "description": "Lightweight scene & take tracker for film shoots",
   "scripts": {
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test": "node --test \"src/tests/*.test.js\""
   },
   "license": "MIT",
-  "type": "commonjs",
+  "type": "module",
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.5"
   },

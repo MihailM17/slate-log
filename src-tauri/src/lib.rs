@@ -512,11 +512,6 @@ fn photo_counts(app: AppHandle, project_id: i64) -> Result<Vec<db::ScenePhotoCou
 }
 
 #[tauri::command]
-fn project_photo_labels(app: AppHandle, project_id: i64) -> Result<Vec<db::PhotoLabel>, String> {
-    db::photo_labels_for_project(&app, project_id).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 fn set_all_scene_cameras(app: AppHandle, project_id: i64, camera: String) -> Result<serde_json::Value, String> {
     let cam = camera.trim().to_string();
     if cam.is_empty() {
@@ -661,7 +656,6 @@ pub fn run() {
             get_stats,
             export_excel,
             photo_counts,
-            project_photo_labels,
             set_all_scene_cameras,
             pick_stage_poster,
             staged_poster_data,
