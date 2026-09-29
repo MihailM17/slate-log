@@ -37,6 +37,10 @@
     <input id="filter" class="filter" placeholder="Filter scenes..." autocomplete="off">
     <div id="scene-list" class="scene-list"></div>
     <div class="side-foot"><span id="stat-total">0 takes</span><span id="stat-rate">0% good</span></div>
+    <div class="side-tools">
+      <button id="btn-settings" class="mini-btn" title="App settings">⚙ Settings</button>
+      <button id="btn-template" class="mini-btn" title="Save a blank CSV template to Documents">Template</button>
+    </div>
   </aside>
 
   <main class="main">
@@ -48,11 +52,8 @@
         <p class="proj-crew" id="proj-crew">—</p>
       </div>
       <div class="top-actions">
-        <button id="btn-settings" class="btn ghost" title="App settings">⚙</button>
         <button id="btn-set" class="btn ghost iconbtn" title="Set mode: phones on this WiFi push stills + takes live"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg> Set</button>
         <button id="btn-import" class="btn ghost" title="Import scenes from CSV">⤓ Import</button>
-        <button id="btn-template" class="btn ghost" title="Save a blank CSV template to Documents">Template</button>
-        <button id="btn-report" class="btn ghost" title="Daily report (print / PDF)">⎙ Report</button>
         <button id="btn-new-scene" class="btn primary">+ New scene</button>
       </div>
     </header>
@@ -79,8 +80,7 @@
       </div>
       <div class="quick-label">Quick notes — tap to add</div>
       <div id="chips" class="chips"></div>
-      <div class="opt2">
-        <div><div class="quick-label">Camera</div><button id="btn-cam" class="btn ghost" title="Change camera for this take">A</button></div>
+      <div class="opt2 solo">
         <div><div class="quick-label">Lens</div><div class="seg" id="seg-lens"><button data-v="24">24</button><button data-v="35">35</button><button data-v="50">50</button><button data-v="85">85</button><button data-v="__custom" id="lens-custom" title="Custom lens">+</button></div></div>
       </div>
       <div class="grid2">
@@ -95,7 +95,7 @@
       <div class="keys-hint">Space log · G good · M maybe · B bad · ↑/↓ scene</div>
     </section>
 
-    <section class="logged-head"><strong>Logged so far</strong><span id="takes-count"></span><span class="logged-spacer"></span><button id="btn-edl" class="btn ghost" title="Good-selects timeline for Resolve / Premiere / Avid">EDL selects</button><button id="btn-export" class="btn ghost">▦ Export to Excel</button></section>
+    <section class="logged-head"><strong>Logged so far</strong><span id="takes-count"></span><span class="logged-spacer"></span><button id="btn-report" class="btn ghost" title="Daily report (print / PDF)">⎙ Report</button><button id="btn-edl" class="btn ghost" title="Good-selects timeline for Resolve / Premiere / Avid">EDL selects</button><button id="btn-export" class="btn ghost">▦ Export to Excel</button></section>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Scene</th><th>Setup</th><th>Day</th><th>Take</th><th>TC in</th><th>Cam</th><th>INT/EXT</th><th>Lens</th><th>Camera file</th><th>Audio file</th><th>Rating</th><th>Quick notes</th><th>Description</th><th></th></tr></thead>
@@ -247,10 +247,19 @@
     </div>
     <div class="set-sec">Quick notes (one per line)</div>
     <label><textarea id="set-quick" rows="4"></textarea></label>
+    <div class="set-sec">Media filenames</div>
+    <label class="check"><input type="checkbox" id="set-autobump"> Suggest next filename (C0004 → C0005)</label>
+    <div class="set-sec">Set mode (phone link)</div>
+    <label>Preferred port<input id="set-port" type="number" min="1024" max="65535" value="17831"></label>
     <div class="set-sec">Excel export</div>
     <label class="check"><input type="checkbox" id="set-exp-good"> Include Good Selects sheet</label>
     <label class="check"><input type="checkbox" id="set-exp-days"> Include Days stats sheet</label>
+    <div class="set-sec">Updates</div>
+    <label class="check"><input type="checkbox" id="set-check-startup"> Check for updates on launch</label>
+    <div class="rowbtns"><button id="btn-check-updates" class="btn ghost">Check for updates</button></div>
+    <p class="tiny" id="update-status"></p>
     <div class="modal-actions">
+      <button id="btn-defaults" class="btn ghost" title="Reset all settings to defaults">Restore defaults</button>
       <button id="btn-close-settings" class="btn primary">Done</button>
     </div>
   </div>

@@ -45,23 +45,24 @@ impl SetMode {
         inner.running && q.get("token").map(|t| t == &inner.token).unwrap_or(false)
     }
 
-    pub async fn start(&self, app: &AppHandle, scene_id: Option<i64>) -> Result<(String, String, u16), String> {
+    pub async fn start(&self, app: &AppHandle, scene_id: Option<i64>, port: Option<u16>) -> Result<(String, String, u16), String> {
         // Restart fresh each session so the token never outlives the modal.
         self.stop();
         let token = new_token();
         let ip = local_ip_address::local_ip().map_err(|e| e.to_string())?;
         // Bind inside the async runtime (Axum/Tokio sockets panic on the
         // main thread — a sync command here crashed the app).
+        let base = port.unwrap_or(17831).clamp(1024, 65520);
         let mut port = 0u16;
         let mut listener = None;
-        for p in 17831..=17845 {
+        for p in base..base.saturating_add(15) {
             if let Ok(l) = tokio::net::TcpListener::bind(format!("0.0.0.0:{p}")).await {
                 port = p;
                 listener = Some(l);
                 break;
             }
         }
-        let listener = listener.ok_or("no free port for set mode (17831-17845)")?;
+        let listener = listener.ok_or(format!("no free port near {base} for set mode"))?;
         {
             let mut inner = self.inner.lock().unwrap();
             inner.running = true;
@@ -326,8 +327,8 @@ async fn api_photo(State(ctx): State<Ctx>, Query(q): Query<HashMap<String, Strin
 // ---------- Tauri commands ----------
 
 #[tauri::command]
-pub async fn set_start(app: AppHandle, set: tauri::State<'_, SetMode>, scene_id: Option<i64>) -> Result<serde_json::Value, String> {
-    let (url, _token, port) = set.start(&app, scene_id).await?;
+pub async fn set_start(app: AppHandle, set: tauri::State<'_, SetMode>, scene_id: Option<i64>, port: Option<u16>) -> Result<serde_json::Value, String> {
+    let (url, _token, port) = set.start(&app, scene_id, port).await?;
     Ok(serde_json::json!({ "url": url, "port": port }))
 }
 

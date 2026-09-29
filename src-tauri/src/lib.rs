@@ -347,6 +347,38 @@ fn write_template_csv(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn check_update(app: AppHandle) -> Result<serde_json::Value, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let update = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
+    match update {
+        Some(u) => Ok(serde_json::json!({ "available": true, "version": u.version, "notes": u.body.clone().unwrap_or_default() })),
+        None => Ok(serde_json::json!({ "available": false })),
+    }
+}
+
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let update = app
+        .updater()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("no update available")?;
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|e| e.to_string())?;
+    app.restart();
+}
+
+#[tauri::command]
+fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+#[tauri::command]
 fn get_stats(app: AppHandle, project_id: Option<i64>) -> Result<serde_json::Value, String> {
     let (total, goods) = db::stats(&app, project_id).map_err(|e| e.to_string())?;
     let rate = if total == 0 { 0 } else { goods * 100 / total };
@@ -392,6 +424,7 @@ fn export_excel(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(net::SetMode::new())
         .setup(|app| {
             let handle = app.handle().clone();
@@ -429,6 +462,9 @@ pub fn run() {
             delete_take,
             get_stats,
             export_excel,
+            app_version,
+            check_update,
+            install_update,
             net::set_start,
             net::set_stop,
             net::set_scene,

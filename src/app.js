@@ -9,6 +9,7 @@ const DEFAULT_SETTINGS = {
   sounds: true, confirmDelete: true, manualTC: false,
   defaultRating: "Good", defaultLens: "35", defaultIntExt: "INT", defaultCam: "",
   quickNotes: [...DEFAULT_QUICK], exportGood: true, exportDays: true,
+  autoBump: true, setPort: 17831, checkStartup: true,
 };
 function loadSettings() {
   try {
@@ -248,7 +249,8 @@ async function stepDay(delta) {
 }
 
 function syncCamBtn() {
-  $("btn-cam").textContent = `${takeCam} ✎`;
+  const b = $("btn-cam");
+  if (b) b.textContent = `${takeCam} ✎`;
 }
 
 function openNewProject() {
@@ -351,8 +353,8 @@ async function loadTakes() {
   await loadPhotos();
   // filenames continue from the last take of this scene (C0004 -> C0005)
   const last = [...state.takes].sort((a, b) => a.take_no - b.take_no).pop();
-  $("take-camfile").value = last?.cam_file ? bumpName(last.cam_file) : "";
-  $("take-audiofile").value = last?.audio_file ? bumpName(last.audio_file) : "";
+  $("take-camfile").value = S.autoBump && last?.cam_file ? bumpName(last.cam_file) : "";
+  $("take-audiofile").value = S.autoBump && last?.audio_file ? bumpName(last.audio_file) : "";
 }
 
 async function refreshStats() {
@@ -601,8 +603,10 @@ function renderPhotos() {
   const w = $("photos");
   const sc = active();
   if (!sc) { w.innerHTML = ""; return; }
-  w.innerHTML = `<div class="photos-head"><strong>Continuity stills</strong><span>${state.photos.length}</span><button id="btn-add-photo" class="mini-btn" title="Import a still into this scene">+ Add photo</button></div><div class="photo-grid" id="photo-grid"></div>`;
+  w.innerHTML = `<div class="photos-head"><strong>Continuity stills</strong><span>${state.photos.length}</span><button id="btn-add-photo" class="addphoto" title="Import a still into this scene">+ Add photo</button><span class="camwrap"><span class="dim">Camera</span> <button id="btn-cam" class="btn ghost" title="Change camera for this take">A</button></span></div><div class="photo-grid" id="photo-grid"></div>`;
   $("btn-add-photo").onclick = addPhoto;
+  $("btn-cam").onclick = openCamPopup;
+  syncCamBtn();
   const g = $("photo-grid");
   state.photos.forEach((p) => {
     const cell = document.createElement("div");
@@ -790,8 +794,8 @@ async function logTake() {
   } catch (e) { toast("Log failed: " + e); return; }
   $("take-no").textContent = pad(state.takeNo);
   $("note").value = "";
-  $("take-camfile").value = bumpName(payload.cam_file);
-  $("take-audiofile").value = bumpName(payload.audio_file);
+  $("take-camfile").value = S.autoBump ? bumpName(payload.cam_file) : "";
+  $("take-audiofile").value = S.autoBump ? bumpName(payload.audio_file) : "";
   if (S.manualTC) $("take-tc").value = nowTC();
   resetTimerUI();
   state.lastDuration = 0;
@@ -837,6 +841,10 @@ $("btn-settings").onclick = () => {
   $("set-quick").value = S.quickNotes.join("\n");
   $("set-exp-good").checked = S.exportGood;
   $("set-exp-days").checked = S.exportDays;
+  $("set-autobump").checked = S.autoBump;
+  $("set-port").value = S.setPort;
+  $("set-check-startup").checked = S.checkStartup;
+  $("update-status").textContent = "";
   $("modal-settings").classList.remove("hidden");
 };
 $("set-sound").onchange = (e) => {
@@ -863,6 +871,48 @@ $("set-quick").onchange = (e) => {
 };
 $("set-exp-good").onchange = (e) => { S.exportGood = e.target.checked; saveSettings(); };
 $("set-exp-days").onchange = (e) => { S.exportDays = e.target.checked; saveSettings(); };
+$("set-autobump").onchange = (e) => { S.autoBump = e.target.checked; saveSettings(); sndClick(); };
+$("set-port").onchange = (e) => {
+  const p = parseInt(e.target.value);
+  S.setPort = p >= 1024 && p <= 65535 ? p : 17831;
+  e.target.value = S.setPort;
+  saveSettings(); sndClick();
+};
+$("set-check-startup").onchange = (e) => { S.checkStartup = e.target.checked; saveSettings(); };
+// ---------- updates (manual button + silent boot check) ----------
+async function checkForUpdates(manual) {
+  const el = $("update-status");
+  try {
+    if (manual) el.textContent = "Checking…";
+    const r = await invoke("check_update");
+    if (r.available) {
+      el.innerHTML = "";
+      const b = document.createElement("button");
+      b.className = "btn primary";
+      b.textContent = `Install v${r.version} & restart`;
+      b.onclick = async () => {
+        el.textContent = "Downloading…";
+        try { await invoke("install_update"); }
+        catch (e) { el.textContent = "Install failed: " + e; }
+      };
+      el.appendChild(document.createTextNode(`v${r.version} available. `));
+      el.appendChild(b);
+      if (!manual) toast(`Slate Log v${r.version} is ready — see Settings → Updates`);
+    } else if (manual) {
+      const v = await invoke("app_version").catch(() => "");
+      el.textContent = `You're on the latest${v ? " (v" + v + ")" : ""}.`;
+    }
+  } catch (e) {
+    if (manual) el.textContent = "Check failed (offline?): " + e;
+  }
+}
+$("btn-check-updates").onclick = () => checkForUpdates(true);
+$("btn-defaults").onclick = () => {
+  Object.assign(S, { ...DEFAULT_SETTINGS, quickNotes: [...DEFAULT_QUICK] });
+  saveSettings(); applySettingsToUI();
+  $("btn-settings").click(); // re-open to refresh all controls
+  toast("Settings restored to defaults");
+};
 $("btn-close-settings").onclick = () => $("modal-settings").classList.add("hidden");
 // ---------- set mode (phone snap page over LAN) ----------
 let setPollH = null;
@@ -870,7 +920,7 @@ let setPollH = null;
 async function openSetMode() {
   if (!state.activeProjectId) { toast("Open a project first"); return; }
   try {
-    const r = await invoke("set_start", { sceneId: state.activeId });
+    const r = await invoke("set_start", { sceneId: state.activeId, port: S.setPort });
     const svg = await invoke("set_qr");
     $("set-qr").innerHTML = svg;
     $("set-url").textContent = r.url;
@@ -942,11 +992,11 @@ $("btn-save-setup").onclick = saveSetup;
 $("btn-cancel-setup").onclick = () => $("modal-setup").classList.add("hidden");
 $("setup-input").onkeydown = (e) => { if (e.key === "Enter") saveSetup(); };
 // camera popup (rare change — kept out of the way on purpose)
-$("btn-cam").onclick = () => {
+function openCamPopup() {
   $("cam-input").value = takeCam;
   $("modal-cam").classList.remove("hidden");
   setTimeout(() => $("cam-input").focus(), 50);
-};
+}
 const saveCam = () => {
   const v = $("cam-input").value.trim();
   if (v) takeCam = v;
@@ -1062,3 +1112,4 @@ setInterval(() => { $("tc-now").textContent = nowTC(); }, 1000);
 $("tc-now").textContent = nowTC();
 applySettingsToUI();
 loadProjects();
+if (S.checkStartup) setTimeout(() => checkForUpdates(false), 5000);
