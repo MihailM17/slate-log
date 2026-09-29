@@ -254,7 +254,7 @@ fn connect(app: &AppHandle) -> rusqlite::Result<Connection> {
     let _ = conn.execute("ALTER TABLE takes ADD COLUMN duration_sec REAL NOT NULL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE projects ADD COLUMN fps REAL NOT NULL DEFAULT 25", []);
     // One "14" per project. May fail on DBs that already contain duplicates
-    // from the unconstrained era — the app-level checks below still guard
+    // from the unconstrained era - the app-level checks below still guard
     // all new writes either way.
     let _ = conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_scenes_project_number ON scenes(project_id, number)",
@@ -740,15 +740,15 @@ pub fn import_photo(app: &AppHandle, scene_id: i64, setup_id: Option<i64>, src: 
         }
     }
     // Decode from bytes (magic-number sniffing), never from the file
-    // extension — uploads arrive as .tmp and phones send all sorts of names.
+    // extension - uploads arrive as .tmp and phones send all sorts of names.
     let bytes = std::fs::read(&src).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
     let fmt = image::guess_format(&bytes).map_err(|_| {
         rusqlite::Error::InvalidParameterName(
-            "photo must be a JPEG, PNG, WebP or GIF image (HEIC is not supported — set the camera to JPEG)".to_string(),
+            "photo must be a JPEG, PNG, WebP or GIF image (HEIC is not supported - set the camera to JPEG)".to_string(),
         )
     })?;
     let img = image::load_from_memory_with_format(&bytes, fmt).map_err(|_| {
-        rusqlite::Error::InvalidParameterName("could not decode that photo — try JPEG".to_string())
+        rusqlite::Error::InvalidParameterName("could not decode that photo - try JPEG".to_string())
     })?;
     let ext = src
         .extension()

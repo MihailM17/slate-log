@@ -51,7 +51,7 @@ impl SetMode {
         let token = new_token();
         let ip = local_ip_address::local_ip().map_err(|e| e.to_string())?;
         // Bind inside the async runtime (Axum/Tokio sockets panic on the
-        // main thread — a sync command here crashed the app).
+        // main thread - a sync command here crashed the app).
         let base = port.unwrap_or(17831).clamp(1024, 65520);
         let mut port = 0u16;
         let mut listener = None;
@@ -161,7 +161,7 @@ fn now_tc() -> String {
     chrono::Local::now().format("%H:%M:%S").to_string()
 }
 
-// Phone screens show these raw — strip the rusqlite prefix.
+// Phone screens show these raw - strip the rusqlite prefix.
 fn user_err(e: rusqlite::Error) -> String {
     match e {
         rusqlite::Error::InvalidParameterName(s) => s,
@@ -171,7 +171,7 @@ fn user_err(e: rusqlite::Error) -> String {
 
 async fn snap_page(State(ctx): State<Ctx>, Query(q): Query<HashMap<String, String>>) -> impl IntoResponse {
     if !ctx.set.authed(&q) {
-        return (StatusCode::FORBIDDEN, Html("<h1>Wrong or missing token — rescan the code in Slate Log.</h1>".to_string()));
+        return (StatusCode::FORBIDDEN, Html("<h1>Wrong or missing token - rescan the code in Slate Log.</h1>".to_string()));
     }
     let token = q.get("token").cloned().unwrap_or_default();
     (StatusCode::OK, Html(SNAP_HTML.replace("__TOKEN__", &token)))
@@ -361,7 +361,7 @@ const SNAP_HTML: &str = r###"<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Slate Log — Set snap</title>
+<title>Slate Log - Set snap</title>
 <style>
 *{box-sizing:border-box}body{margin:0;background:#121110;color:#ece7df;font:16px/1.5 -apple-system,system-ui,sans-serif;padding:16px;max-width:560px;margin:0 auto}
 h1{font-size:22px;margin:4px 0}.sub{color:#a39c90;font-size:13px;margin-bottom:12px}
@@ -393,7 +393,7 @@ select,input,textarea{width:100%;background:#141312;border:1px solid #2c2a26;col
 <button class="btn primary" id="upload">Upload still</button>
 </div>
 <div class="card">
-<label>Quick take — rating</label>
+<label>Quick take - rating</label>
 <div class="seg" id="rating"><button data-v="Bad">Bad</button><button data-v="Maybe">Maybe</button><button data-v="Good" class="on">Good</button></div>
 <div class="row2"><div><label>Camera</label><input id="cam" placeholder="A"></div><div><label>Lens</label><input id="lens" placeholder="35mm"></div></div>
 <label>Note</label><input id="note" placeholder="What happened…" autocomplete="off">
@@ -412,7 +412,7 @@ async function ctx(){
   $("film").textContent=(j.film||"Slate Log")+(j.scene?(" · Sc "+j.scene.number):"");
   const ss=$("scene");ss.innerHTML="";j.scenes.forEach(s=>{const o=document.createElement("option");o.value=s.id;o.textContent=s.number+" · "+(s.title||"");if(j.scene&&s.id===j.scene.id)o.selected=true;ss.appendChild(o);});
   curScene=j.scene?j.scene.id:(j.scenes[0]?j.scenes[0].id:null);
-  const su=$("setup");su.innerHTML="";const n0=document.createElement("option");n0.value="";n0.textContent="— Whole scene —";su.appendChild(n0);
+  const su=$("setup");su.innerHTML="";const n0=document.createElement("option");n0.value="";n0.textContent="- Whole scene -";su.appendChild(n0);
   (j.setups||[]).forEach(u=>{const o=document.createElement("option");o.value=u.id;o.textContent=u.name;su.appendChild(o);});
 }
 $("scene").onchange=async()=>{const id=parseInt($("scene").value);await fetch("api/scene?token="+encodeURIComponent(TOKEN),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({scene_id:id})});ctx();};

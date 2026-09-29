@@ -7,9 +7,9 @@ Lightweight, offline-first scene & take tracker for film shoots. Mac + Windows f
 - **Continuity stills** per scene (thumbnails, lightbox, captions, contact sheet in the report)
 - Scene status (Not shot / Partial / Complete) + **wrap progress board**
 - **CSV scene import** (with template), **daily report** view (print / save as PDF)
-- SQLite storage on your machine — no account, no cloud, works offline on set
+- SQLite storage on your machine - no account, no cloud, works offline on set
 - Exports: Excel (All Takes, Good Selects, per-day stats), **PDF daily log**, **EDL selects timeline** (Resolve / Premiere / Avid)
-- **📷 Set mode**: phones on the set WiFi scan a QR and push continuity stills + quick takes live — no install, no accounts, no internet
+- **📷 Set mode**: phones on the set WiFi scan a QR and push continuity stills + quick takes live - no install, no accounts, no internet
 
 Built with [Tauri v2](https://tauri.app/) (Rust backend, vanilla JS frontend). 3.7MB .dmg, ~5MB installed.
 

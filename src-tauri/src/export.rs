@@ -114,7 +114,7 @@ pub fn write_pdf(
     takes: &[TakeWithScene],
 ) -> Result<(), String> {
     use std::io::BufWriter;
-    let (doc, p1, l1) = PdfDocument::new(format!("{film} — Day {day} log"), Mm(297.0), Mm(210.0), "Layer 1");
+    let (doc, p1, l1) = PdfDocument::new(format!("{film} - Day {day} log"), Mm(297.0), Mm(210.0), "Layer 1");
     let font = doc.add_external_font(&mut std::io::Cursor::new(INTER)).map_err(|e| e.to_string())?;
     let bold = doc.add_external_font(&mut std::io::Cursor::new(INTER_BOLD)).map_err(|e| e.to_string())?;
     // Landscape A4, 12mm margins.
@@ -135,7 +135,7 @@ pub fn write_pdf(
         pg.y -= gap;
     };
     let date = chrono::Local::now().format("%d %b %Y").to_string();
-    line(&doc, &mut pg, &format!("{film} — Daily log, Day {day}"), 17.0, true, 8.0);
+    line(&doc, &mut pg, &format!("{film} - Daily log, Day {day}"), 17.0, true, 8.0);
     let mut sub = date.clone();
     if !director.trim().is_empty() {
         sub.push_str(&format!(" · Dir. {}", director.trim()));
@@ -166,7 +166,7 @@ pub fn write_pdf(
     draw_row(&doc, &mut pg, &head_cells, true, &font, &bold);
     pg.y -= 2.0;
     for t in takes {
-        let dur = if t.duration_sec > 0.0 { format!("{:.0}s", t.duration_sec) } else { "—".to_string() };
+        let dur = if t.duration_sec > 0.0 { format!("{:.0}s", t.duration_sec) } else { "-".to_string() };
         draw_row(
             &doc, &mut pg,
             &[
@@ -189,7 +189,7 @@ pub fn write_pdf(
         let n = takes.iter().filter(|t| t.scene_id == s.id).count();
         line(
             &doc, &mut pg,
-            &format!("{} · {} — {} · {} takes", trunc(&s.number, 8), trunc(&s.title, 50), s.status, n),
+            &format!("{} · {} - {} · {} takes", trunc(&s.number, 8), trunc(&s.title, 50), s.status, n),
             9.5, false, 5.5,
         );
     }

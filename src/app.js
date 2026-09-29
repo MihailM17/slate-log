@@ -1,4 +1,4 @@
-// Slate Log — projects + scenes + takes. Empty start, no seed data.
+// Slate Log - projects + scenes + takes. Empty start, no seed data.
 const invoke = async (cmd, args = {}) => {
   if (window.__TAURI__?.core?.invoke) return window.__TAURI__.core.invoke(cmd, args);
   throw new Error("no-tauri");
@@ -52,7 +52,7 @@ function confirmAsync(msg, okLabel = "Delete") {
 }
 
 const $ = (id) => document.getElementById(id);
-// Escape all user data before innerHTML — the DB can hold arbitrary strings.
+// Escape all user data before innerHTML - the DB can hold arbitrary strings.
 const esc = (v) =>
   String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const pad = (n) => String(n).padStart(2, "0");
@@ -181,7 +181,7 @@ async function renderReport() {
   const today = new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
   const row = (t) => `<tr><td><b>${esc(t.scene_number)}</b>${t.setup_name ? " · " + esc(t.setup_name) : ""}</td><td>${pad(t.take_no)}</td><td>${esc(t.tc_in)}</td><td>${esc(t.cam)}</td><td>${esc(t.lens)}</td><td>${esc(t.cam_file)}</td><td>${esc(t.audio_file)}</td><td>${esc(t.rating)}</td><td>${esc(t.tags)}</td><td>${esc(t.note)}</td></tr>`;
   $("report-body").innerHTML = `
-    <h1>${esc(p.film_name) || "Untitled film"} — Daily report</h1>
+    <h1>${esc(p.film_name) || "Untitled film"} - Daily report</h1>
     <p class="rmeta">Day ${day} · ${esc(today)}${p.director ? " · Dir. " + esc(p.director) : ""}${p.location ? " · " + esc(p.location) : ""}</p>
     <div class="statgrid">
       <div><b>${takes.length}</b><span>takes</span></div>
@@ -223,16 +223,16 @@ function renderProjectHeader() {
   $("proj-name").textContent = p.film_name || "Untitled film";
   // Day follows the selected scene; project day is the fallback for new scenes.
   $("day-label").textContent = `Day ${active()?.day ?? p.shoot_day ?? 1}`;
-  $("proj-sub").textContent = `${p.location}${p.unit ? ", " + p.unit : ""}` || "—";
+  $("proj-sub").textContent = `${p.location}${p.unit ? ", " + p.unit : ""}` || "-";
   const crew = [p.director && `Dir. ${p.director}`, p.camera_op && `Cam op. ${p.camera_op}`].filter(Boolean).join(" · ");
-  $("proj-crew").textContent = crew || "—";
-  document.title = `${p.film_name || "Slate Log"} — Slate Log`;
+  $("proj-crew").textContent = crew || "-";
+  document.title = `${p.film_name || "Slate Log"} - Slate Log`;
 }
 
 async function stepDay(delta) {
   const sc = active();
   if (sc) {
-    // Day lives on the scene — the stepper is a quick way to set it.
+    // Day lives on the scene - the stepper is a quick way to set it.
     const day = Math.max(1, (sc.day || 1) + delta);
     const payload = { number: sc.number, title: sc.title, int_ext: sc.int_ext, daypart: sc.daypart, description: sc.description, camera_default: sc.camera_default, day, location: sc.location || "", status: sc.status || "Not shot" };
     try { await invoke("update_scene", { id: sc.id, scene: payload }); } catch (e) { toast("Day change failed: " + e); return; }
@@ -280,7 +280,7 @@ async function saveProject() {
     director: $("p-director").value.trim(), camera_op: $("p-cameraop").value.trim(),
     location: $("p-location").value.trim(), unit: $("p-unit").value.trim(),
     fps: parseFloat($("p-fps").value) || 25,
-    // days are driven by the ◀ Day ▶ stepper, cameras per take — not asked here
+    // days are driven by the ◀ Day ▶ stepper, cameras per take - not asked here
     shoot_day: state.editingProjectId ? (cur?.shoot_day ?? 1) : 1,
     total_days: state.editingProjectId ? (cur?.total_days ?? 1) : 1,
     camera_a: cur?.camera_a ?? "", camera_b: cur?.camera_b ?? "",
@@ -407,7 +407,7 @@ function openNewScene() {
   const nums = state.scenes.map((s) => parseInt(s.number, 10)).filter((n) => !isNaN(n));
   $("f-number").value = nums.length ? String(Math.max(...nums) + 1) : "1";
   $("f-title").value = ""; $("f-desc").value = "";
-  // Carry the camera forward from the previous (highest-numbered) scene —
+  // Carry the camera forward from the previous (highest-numbered) scene -
   // same rig 90% of the time, still editable.
   const prevCam = state.scenes
     .map((s) => ({ n: parseInt(s.number, 10), cam: (s.camera_default || "").trim() }))
@@ -437,8 +437,8 @@ function renderHead() {
   const s = active();
   if (!s) { $("scene-head").innerHTML = `<p class="empty-hint">Select or create a scene to start logging.</p>`; return; }
   const p = activeProject();
-  $("scene-head").innerHTML = `<h2><span class="n">${esc(s.number)}</span>${esc(s.int_ext)}. ${esc(s.title || "").toUpperCase()} — ${esc(s.daypart).toUpperCase()}<button class="scene-edit-btn" id="btn-edit-scene">✎ Edit</button><button class="status-btn ${esc(s.status || "Not shot").replace(" ", "")}" id="btn-status" title="Tap to cycle shoot status">${esc(s.status || "Not shot")}</button></h2>
-    <div class="meta"><span>Day ${s.day ?? "–"}</span>${s.location ? `<span>${esc(s.location)}</span>` : ""}<span>${state.takes.length} takes logged</span><span>Camera ${esc(s.camera_default) || "—"}</span></div>
+  $("scene-head").innerHTML = `<h2><span class="n">${esc(s.number)}</span>${esc(s.int_ext)}. ${esc(s.title || "").toUpperCase()} - ${esc(s.daypart).toUpperCase()}<button class="scene-edit-btn" id="btn-edit-scene">✎ Edit</button><button class="status-btn ${esc(s.status || "Not shot").replace(" ", "")}" id="btn-status" title="Tap to cycle shoot status">${esc(s.status || "Not shot")}</button></h2>
+    <div class="meta"><span>Day ${s.day ?? "–"}</span>${s.location ? `<span>${esc(s.location)}</span>` : ""}<span>${state.takes.length} takes logged</span><span>Camera ${esc(s.camera_default) || "-"}</span></div>
     <p class="desc">${esc(s.description) || ""}</p>`;
   $("take-no").textContent = pad(state.takeNo);
   $("btn-edit-scene").onclick = () => openEditScene(s);
@@ -494,7 +494,7 @@ function openEditTake(t) {
   $("e-tags").value = t.tags || ""; $("e-note").value = t.note || "";
   const sel = $("e-setup"); sel.innerHTML = "";
   const none = document.createElement("option");
-  none.value = ""; none.textContent = "— Whole scene —";
+  none.value = ""; none.textContent = "- Whole scene -";
   sel.appendChild(none);
   state.setups
     .filter((u) => u.scene_id === t.scene_id)
@@ -504,14 +504,14 @@ function openEditTake(t) {
       if (t.setup_id === u.id) o.selected = true;
       sel.appendChild(o);
     });
-  // setups may have changed since the scene was opened — refresh quietly
+  // setups may have changed since the scene was opened - refresh quietly
   invoke("list_setups", { sceneId: t.scene_id }).then((fresh) => {
     if (!Array.isArray(fresh)) return;
     state.setups = state.setups.filter((u) => u.scene_id !== t.scene_id).concat(fresh);
     const cur = sel.value;
     sel.innerHTML = "";
     const n0 = document.createElement("option");
-    n0.value = ""; n0.textContent = "— Whole scene —";
+    n0.value = ""; n0.textContent = "- Whole scene -";
     sel.appendChild(n0);
     fresh.forEach((u) => {
       const o = document.createElement("option");
@@ -561,7 +561,7 @@ function renderSetupChips() {
   };
   c.appendChild(mk(null, "Whole scene", null, state.takeSetupId == null, "No specific setup"));
   state.setups.forEach((u) => {
-    const s = mk(u.id, u.name, u.take_count, state.takeSetupId === u.id, `${u.name} — click × to delete setup`);
+    const s = mk(u.id, u.name, u.take_count, state.takeSetupId === u.id, `${u.name} - click × to delete setup`);
     const x = document.createElement("button");
     x.className = "x"; x.textContent = "×"; x.title = `Delete setup “${u.name}” (takes stay)`;
     x.onclick = async (e) => {
@@ -612,7 +612,7 @@ function renderPhotos() {
     const cell = document.createElement("div");
     cell.className = "photo-cell";
     cell.title = "Open still";
-    cell.innerHTML = `<img alt="Continuity still"><button class="px" title="Delete this still">×</button><div class="cap">${esc(p.caption) || esc(p.setup_name) || "—"}</div>`;
+    cell.innerHTML = `<img alt="Continuity still"><button class="px" title="Delete this still">×</button><div class="cap">${esc(p.caption) || esc(p.setup_name) || "-"}</div>`;
     cell.querySelector("img").onclick = () => openLightbox(p.id);
     cell.querySelector(".px").onclick = async (e) => {
       e.stopPropagation();
@@ -667,7 +667,7 @@ function toggleTimer() {
     const s = (performance.now() - timing) / 1000;
     resetTimerUI();
     $("take-timer").textContent = fmtDur(s);
-    toast(`Timed ${s.toFixed(1)}s — will attach to the next logged take`);
+    toast(`Timed ${s.toFixed(1)}s - will attach to the next logged take`);
     state.lastDuration = s;
     return;
   }
@@ -688,7 +688,7 @@ function openProgress() {
 
 function renderProgress() {
   const p = activeProject(); if (!p) return;
-  $("progress-sub").textContent = `${p.film_name || "Untitled film"} — wrap progress`;
+  $("progress-sub").textContent = `${p.film_name || "Untitled film"} - wrap progress`;
   const days = [...new Set(state.scenes.map((s) => s.day ?? 1))].sort((a, b) => a - b);
   const done = state.scenes.filter((s) => s.status === "Complete").length;
   const pct = state.scenes.length ? Math.round((done * 100) / state.scenes.length) : 0;
@@ -754,7 +754,7 @@ function syncLensSeg() {
     if (b.dataset.v === "__custom") {
       b.classList.toggle("on", custom);
       b.textContent = custom ? state.lens : "+";
-      b.title = custom ? `Custom lens ${state.lens} — click to change` : "Custom lens";
+      b.title = custom ? `Custom lens ${state.lens} - click to change` : "Custom lens";
     } else {
       b.classList.toggle("on", b.dataset.v === state.lens);
     }
@@ -897,7 +897,7 @@ async function checkForUpdates(manual) {
       };
       el.appendChild(document.createTextNode(`v${r.version} available. `));
       el.appendChild(b);
-      if (!manual) toast(`Slate Log v${r.version} is ready — see Settings → Updates`);
+      if (!manual) toast(`Slate Log v${r.version} is ready - see Settings → Updates`);
     } else if (manual) {
       const v = await invoke("app_version").catch(() => "");
       el.textContent = `You're on the latest${v ? " (v" + v + ")" : ""}.`;
@@ -928,7 +928,7 @@ async function openSetMode() {
     refreshSetScene();
     setPollH = setInterval(refreshSetScene, 2500);
     try {
-      toast("Set mode on — macOS may ask to allow incoming connections: click Allow");
+      toast("Set mode on - macOS may ask to allow incoming connections: click Allow");
     } catch { /* ignore */ }
   } catch (e) { toast("Set mode failed: " + e); }
 }
@@ -937,7 +937,7 @@ async function refreshSetScene() {
   try {
     const info = await invoke("set_info");
     if (!info.running) { closeSetMode(true); return; }
-    $("set-scene").textContent = info.scene_number ? `Scene ${info.scene_number} ${info.scene_title || ""}` : "—";
+    $("set-scene").textContent = info.scene_number ? `Scene ${info.scene_number} ${info.scene_title || ""}` : "-";
   } catch { /* server went away */ }
 }
 
@@ -947,7 +947,7 @@ async function closeSetMode(silent) {
   try { await invoke("set_stop"); } catch { /* ignore */ }
   $("modal-set").classList.add("hidden");
   if (!silent) sndClick();
-  // Phone may have pushed stills/takes while we were covered — refresh.
+  // Phone may have pushed stills/takes while we were covered - refresh.
   if (state.activeProjectId) {
     await loadTakes();
     renderScenes(); renderHead();
@@ -991,7 +991,7 @@ $("btn-add-setup").onclick = () => {
 $("btn-save-setup").onclick = saveSetup;
 $("btn-cancel-setup").onclick = () => $("modal-setup").classList.add("hidden");
 $("setup-input").onkeydown = (e) => { if (e.key === "Enter") saveSetup(); };
-// camera popup (rare change — kept out of the way on purpose)
+// camera popup (rare change - kept out of the way on purpose)
 function openCamPopup() {
   $("cam-input").value = takeCam;
   $("modal-cam").classList.remove("hidden");
