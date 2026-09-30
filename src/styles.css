@@ -98,6 +98,8 @@ input.invalid{border-color:#e0705c!important}
 .side-tools{display:flex;gap:6px;margin-top:10px}
 .side-tools .mini-btn{flex:1;border:1px solid var(--line);background:var(--panel2);color:var(--mut);font-size:12.5px;padding:8px 10px;border-radius:8px}
 .side-tools .mini-btn:hover{color:var(--txt);border-color:var(--mut)}
+.side-tools .mini-btn svg{width:14px;height:14px;vertical-align:-2px;margin-right:6px;flex-shrink:0}
+.iconbtn svg{flex-shrink:0;display:block}
 .photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
 .photo-cell{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;cursor:pointer;position:relative}
 .photo-cell img{width:100%;height:90px;object-fit:cover;display:block}
