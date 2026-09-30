@@ -179,9 +179,14 @@ describe("project modal", () => {
       return {};
     };
     el("btn-home-new").onclick();
-    await el("btn-poster-pick").onclick();
+    el("btn-poster-pick").textContent = "Choose…"; // as in index.html
+    const pick = el("btn-poster-pick").onclick();
+    assert.equal(el("btn-poster-pick").disabled, true); // busy feedback while decoding
+    await pick;
     assert.equal(state.pendingPosterKey, "k1");
     assert.equal(el("p-poster").src, "data:image/jpeg;base64,AAA");
+    assert.equal(el("btn-poster-pick").disabled, false);
+    assert.match(el("btn-poster-pick").textContent, /Choose/);
     el("btn-poster-remove").onclick();
     assert.equal(state.pendingPosterKey, null);
     assert.equal(state.posterRemove, true);

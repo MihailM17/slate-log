@@ -1177,13 +1177,16 @@ fn stage_poster_bytes(jpg: Vec<u8>) -> String {
 }
 
 /// Decode any common image, shrink to 960px wide, return JPEG bytes.
+/// Triangle is used over Lanczos3 deliberately: on a 12–48MP phone photo
+/// Lanczos takes seconds on the command thread, Triangle is a fraction of
+/// that and indistinguishable at poster size.
 fn process_poster_bytes(raw: &[u8]) -> Result<Vec<u8>, String> {
     let fmt = image::guess_format(raw)
         .map_err(|_| "poster must be a JPEG, PNG, WebP or GIF image".to_string())?;
     let img = image::load_from_memory_with_format(raw, fmt)
         .map_err(|_| "could not decode that image — try JPEG or PNG".to_string())?;
     let img = if img.width() > 960 {
-        img.resize(960, 960, image::imageops::FilterType::Lanczos3)
+        img.resize(960, 960, image::imageops::FilterType::Triangle)
     } else {
         img
     };
@@ -1193,8 +1196,49 @@ fn process_poster_bytes(raw: &[u8]) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
+/// Convert iPhone HEIC the same way continuity stills do (macOS sips).
+/// Returns the bytes to process and an optional temp file to clean up.
+fn read_poster_source(src: &PathBuf) -> rusqlite::Result<(Vec<u8>, Option<PathBuf>)> {
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+    if ext == "heic" || ext == "heif" {
+        #[cfg(target_os = "macos")]
+        {
+            let out = std::env::temp_dir().join(format!("slate-poster-{}.jpg", unique_stem()));
+            let st = std::process::Command::new("sips")
+                .args(["-s", "format", "jpeg"])
+                .arg(src)
+                .arg("--out")
+                .arg(&out)
+                .output()
+                .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+            if !st.status.success() {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "could not convert that HEIC poster — try JPEG or PNG".to_string(),
+                ));
+            }
+            let raw = std::fs::read(&out).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+            return Ok((raw, Some(out)));
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "HEIC posters convert on macOS only — try JPEG or PNG".to_string(),
+            ));
+        }
+    }
+    let raw = std::fs::read(src).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+    Ok((raw, None))
+}
+
 pub fn stage_poster_file(src: PathBuf) -> rusqlite::Result<String> {
-    let raw = std::fs::read(&src).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+    let (raw, tmp) = read_poster_source(&src)?;
+    if let Some(p) = tmp {
+        let _ = std::fs::remove_file(p);
+    }
     if raw.len() > 25_000_000 {
         return Err(rusqlite::Error::InvalidParameterName("image is too large (25MB max)".into()));
     }
@@ -1659,6 +1703,46 @@ pub fn undo_last_delete(app: &AppHandle) -> rusqlite::Result<UndoResult> {
 
 pub fn undo_available() -> bool {
     undo_stack().lock().map(|s| !s.is_empty()).unwrap_or(false)
+}
+
+#[cfg(test)]
+mod poster_tests {
+    use super::*;
+    use image::{Rgb, RgbImage};
+
+    fn jpeg_bytes(w: u32, h: u32) -> Vec<u8> {
+        let mut img = RgbImage::new(w, h);
+        for (x, y, p) in img.enumerate_pixels_mut() {
+            *p = Rgb([(x % 256) as u8, (y % 256) as u8, 128]);
+        }
+        let mut buf = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Jpeg)
+            .unwrap();
+        buf
+    }
+
+    #[test]
+    fn poster_shrinks_large_images_to_960() {
+        let out = process_poster_bytes(&jpeg_bytes(2000, 1500)).unwrap();
+        let back =
+            image::load_from_memory_with_format(&out, image::ImageFormat::Jpeg).unwrap();
+        assert!(back.width() <= 960, "width {}", back.width());
+    }
+
+    #[test]
+    fn poster_rejects_garbage() {
+        assert!(process_poster_bytes(b"not an image at all").is_err());
+    }
+
+    #[test]
+    fn stage_rejects_oversize_files() {
+        let path = std::env::temp_dir().join(format!("slate-poster-test-{}.jpg", unique_stem()));
+        std::fs::write(&path, vec![0u8; 26_000_000]).unwrap();
+        let r = stage_poster_file(path.clone());
+        let _ = std::fs::remove_file(&path);
+        assert!(r.is_err());
+    }
 }
 
 #[cfg(test)]

@@ -530,7 +530,7 @@ async fn pick_stage_poster(app: AppHandle) -> Result<serde_json::Value, String> 
         let (tx, rx) = std::sync::mpsc::channel::<Option<FilePath>>();
         app2.dialog()
             .file()
-            .add_filter("Images", &["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff", "gif"])
+            .add_filter("Images", &["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff", "gif", "heic", "heif"])
             .pick_file(move |p| {
                 let _ = tx.send(p);
             });

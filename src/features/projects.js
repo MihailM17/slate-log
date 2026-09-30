@@ -206,6 +206,9 @@ export function initProjects(d) {
   $("btn-cancel-project").onclick = () => $("modal-project").classList.add("hidden");
   $("btn-save-project").onclick = saveProject;
   $("btn-poster-pick").onclick = async () => {
+    const btn = $("btn-poster-pick");
+    const label = btn.textContent;
+    btn.disabled = true; btn.textContent = "Loading…";
     try {
       const r = await api.pickStagePoster();
       if (r.cancelled) return;
@@ -214,6 +217,7 @@ export function initProjects(d) {
       setPosterPreview(src);
       sndClick();
     } catch (e) { toast("Poster failed: " + e); }
+    finally { btn.disabled = false; btn.textContent = label; }
   };
   $("btn-poster-remove").onclick = () => {
     state.pendingPosterKey = null; state.posterRemove = true;
