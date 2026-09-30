@@ -566,6 +566,16 @@ fn remove_project_poster(app: AppHandle, project_id: i64) -> Result<(), String> 
 }
 
 #[tauri::command]
+fn open_project_photos(app: AppHandle, project_id: Option<i64>) -> Result<String, String> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = db::photos_folder(&app, project_id).map_err(|e| e.to_string())?;
+    app.opener()
+        .open_path(dir.to_string_lossy().to_string(), None::<String>)
+        .map_err(|e| e.to_string())?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 fn undo_delete(app: AppHandle) -> Result<db::UndoResult, String> {
     db::undo_last_delete(&app).map_err(|e| {
         let m = e.to_string();
@@ -615,6 +625,7 @@ fn export_excel(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(net::SetMode::new())
         .setup(|app| {
@@ -661,6 +672,7 @@ pub fn run() {
             staged_poster_data,
             project_poster_data,
             remove_project_poster,
+            open_project_photos,
             undo_delete,
             app_version,
             check_update,

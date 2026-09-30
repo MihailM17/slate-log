@@ -49,6 +49,7 @@ export const pickStagePoster = () => invoke("pick_stage_poster");
 export const stagedPosterData = (key) => invoke("staged_poster_data", { key });
 export const projectPosterData = (projectId) => invoke("project_poster_data", { projectId });
 export const removeProjectPoster = (projectId) => invoke("remove_project_poster", { projectId });
+export const openProjectPhotos = (projectId) => invoke("open_project_photos", { projectId });
 
 // ---------- import / export ----------
 export const importScenesCsv = (projectId) => invoke("import_scenes_csv", { projectId });

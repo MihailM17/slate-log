@@ -36,6 +36,7 @@ const CONTRACT = {
   stagedPosterData: ["staged_poster_data", { key: "k" }],
   projectPosterData: ["project_poster_data", { projectId: 1 }],
   removeProjectPoster: ["remove_project_poster", { projectId: 1 }],
+  openProjectPhotos: ["open_project_photos", { projectId: 1 }],
   importScenesCsv: ["import_scenes_csv", { projectId: 1 }],
   importScreenplayPdf: ["import_screenplay_pdf", {}],
   parseScreenplayText: ["parse_screenplay_text", { text: "INT. X - DAY" }],

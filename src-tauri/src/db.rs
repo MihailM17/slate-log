@@ -732,9 +732,24 @@ pub fn remove_setup(app: &AppHandle, id: i64) -> rusqlite::Result<()> {
 // ---------- Photos (continuity stills, stored locally) ----------
 
 fn photos_dir(app: &AppHandle, project_id: i64) -> PathBuf {
+    photos_root(app).join(project_id.to_string())
+}
+
+fn photos_root(app: &AppHandle) -> PathBuf {
     let dir = db_path(app);
     let base = dir.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
-    base.join("photos").join(project_id.to_string())
+    base.join("photos")
+}
+
+/// Photo folder for a project (or the shared root when none is open).
+/// Created on demand so there is always something to reveal.
+pub fn photos_folder(app: &AppHandle, project_id: Option<i64>) -> rusqlite::Result<PathBuf> {
+    let dir = match project_id {
+        Some(pid) => photos_dir(app, pid),
+        None => photos_root(app),
+    };
+    std::fs::create_dir_all(&dir).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
+    Ok(dir)
 }
 
 fn photo_project_of(conn: &Connection, scene_id: i64) -> rusqlite::Result<i64> {

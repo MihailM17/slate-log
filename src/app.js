@@ -18,7 +18,7 @@ import { initSetMode, openSetMode, closeSetMode, pushSceneToServer } from "./fea
 import { initScriptImport } from "./features/scriptImport.js";
 
 import { S, state, DEFAULT_SHORTCUTS } from "./store.js";
-import { $ } from "./ui.js";
+import { $, toast } from "./ui.js";
 import { initSettings, applySettingsToUI, handleCaptureKey } from "./features/settings.js";
 async function refreshStats() {
   if (!state.activeProjectId) return;
@@ -126,6 +126,11 @@ initTakes({ renderScenes, renderHead, refreshStats, loadPhotos, reloadScenes: lo
 initScenes({ refreshStats, pushSceneToServer });
 initPhotos({ openSetMode });
 initProjects({ refreshStats, onExportProject: (id) => exportExcel(id) });
+$("btn-photos").onclick = async () => {
+  try {
+    await api.openProjectPhotos(state.activeProjectId);
+  } catch (e) { toast("Could not open photo folder: " + e); }
+};
 initProgress();
 initReport();
 initScriptImport({ loadScenes });

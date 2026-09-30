@@ -29,7 +29,7 @@ describe("app boot (no backend)", () => {
       "btn-new-scene", "btn-create", "day-prev", "day-next",  // scenes
       "btn-log", "btn-timer", "btn-cam", "btn-add-setup",     // takes
       "btn-lightbox-close", "btn-lightbox-save",              // photos
-      "btn-settings", "btn-open-shortcuts", "btn-check-updates", // settings
+      "btn-settings", "btn-photos", "btn-open-shortcuts", "btn-check-updates", // settings
       "btn-progress", "btn-report", "btn-edl", "btn-pdf", "btn-export", // outputs
       "btn-script", "btn-script-parse", "btn-script-import",  // script import
       "btn-close-set",                                       // set mode
