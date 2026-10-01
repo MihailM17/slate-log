@@ -25,7 +25,7 @@ export async function openSetMode() {
     refreshSetScene();
     setPollH = setInterval(refreshSetScene, 2500);
     try {
-      toast("Set mode on - macOS may ask to allow incoming connections: click Allow");
+      toast("Set mode on - allow Slate Log in the Windows Firewall prompt if asked (macOS: allow incoming connections)");
     } catch { /* ignore */ }
   } catch (e) { toast("Set mode failed: " + e); }
 }

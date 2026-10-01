@@ -432,7 +432,7 @@ $("logtake").onclick=async()=>{
   body:JSON.stringify({rating,note:$("note").value,cam:$("cam").value,lens:$("lens").value,setup_id:su===""?null:parseInt(su)})});
   const j=await r.json();if(j.ok){say("Take "+String(j.take_no).padStart(2,"0")+" logged ✓");$("note").value="";$("file").value="";$("preview").style.display="none";$("caption").value="";}else say(j.error||"failed",false);}catch(e){say("network error",false);}
 };
-ctx();
+ctx().catch(()=>say("cannot reach Slate Log — same WiFi? firewall?",false));
 </script>
 </body>
 </html>"###;
