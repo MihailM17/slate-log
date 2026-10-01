@@ -62,6 +62,17 @@ export const SIDEBAR_MIN = 200;
 export const SIDEBAR_MAX = 520;
 export const clampSidebarWidth = (w) => Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, Math.round(w)));
 
+// Should a wheel gesture be contained to this scroller (true) or let through
+// to the page behind (false)? A box with no overflow never contains: without
+// this check, wheeling over a short table or list eats the gesture and the
+// page behind mysteriously stops scrolling.
+export function shouldIsolateWheel(el, deltaY) {
+  if (el.scrollHeight <= el.clientHeight + 1) return false;
+  const top = el.scrollTop <= 0;
+  const bottom = Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight - 1;
+  return (top && deltaY < 0) || (bottom && deltaY > 0);
+}
+
 // Full NewScene payload from a scene row, with overrides (int_ext, day, status…).
 export function scenePayload(sc, overrides = {}) {
   return {

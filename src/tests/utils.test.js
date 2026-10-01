@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   esc, pad, keyName, fmtDur, fmtLens, validTC, bumpName, nextStatus,
   rateDot, photoCountText, calcProgress, mapScriptSceneForImport,
-  clampSidebarWidth, scenePayload,
+  clampSidebarWidth, shouldIsolateWheel, scenePayload,
 } from "../utils.js";
 
 describe("esc", () => {
@@ -144,6 +144,26 @@ describe("clampSidebarWidth", () => {
     assert.equal(clampSidebarWidth(150), 200);
     assert.equal(clampSidebarWidth(600), 520);
     assert.equal(clampSidebarWidth(300.4), 300);
+  });
+});
+
+describe("shouldIsolateWheel", () => {
+  it("passes through when there is nothing to scroll", () => {
+    const flat = { scrollTop: 0, clientHeight: 200, scrollHeight: 200 };
+    assert.equal(shouldIsolateWheel(flat, 100), false);
+    assert.equal(shouldIsolateWheel(flat, -100), false);
+  });
+
+  it("contains at the edges, passes through mid-list", () => {
+    const top = { scrollTop: 0, clientHeight: 200, scrollHeight: 600 };
+    assert.equal(shouldIsolateWheel(top, -100), true);
+    assert.equal(shouldIsolateWheel(top, 100), false);
+    const mid = { scrollTop: 150, clientHeight: 200, scrollHeight: 600 };
+    assert.equal(shouldIsolateWheel(mid, 100), false);
+    assert.equal(shouldIsolateWheel(mid, -100), false);
+    const bottom = { scrollTop: 400, clientHeight: 200, scrollHeight: 600 };
+    assert.equal(shouldIsolateWheel(bottom, 100), true);
+    assert.equal(shouldIsolateWheel(bottom, -100), false);
   });
 });
 

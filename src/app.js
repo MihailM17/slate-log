@@ -3,7 +3,7 @@
 // chrome (sidebar stats/resize, scroll isolation) and feature init. Every
 // feature lives in its own module under features/ (tested via npm test).
 import * as api from "./api.js";
-import { nowTC, clampSidebarWidth } from "./utils.js";
+import { nowTC, clampSidebarWidth, shouldIsolateWheel } from "./utils.js";
 import {
   initTakes, loadTakes, logTake, renderChips, syncLensSeg,
 } from "./features/takes.js";
@@ -168,11 +168,10 @@ loadProjects();
 
 // ---------- scroll isolation: a list/modal at its end must not scroll the page behind ----------
 // Single capture-phase handler covers re-rendered lists too (no listener pile-up).
+// shouldIsolateWheel (tested) decides: scrollers with no overflow pass through.
 document.addEventListener("wheel", (e) => {
   const el = e.target.closest?.("#scene-list, .modal-card, .table-wrap, .photo-grid");
   if (!el) return;
-  const top = el.scrollTop <= 0;
-  const bottom = Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight - 1;
-  if ((top && e.deltaY < 0) || (bottom && e.deltaY > 0)) e.preventDefault();
+  if (shouldIsolateWheel(el, e.deltaY)) e.preventDefault();
   e.stopPropagation();
 }, { passive: false, capture: true });

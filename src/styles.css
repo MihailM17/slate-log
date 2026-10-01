@@ -18,7 +18,7 @@ h1{font:600 22px 'Barlow Condensed',sans-serif;letter-spacing:.02em;margin:0}
 .sub{color:var(--dim);font-size:12px;margin:2px 0 16px}
 .scenes-head{display:flex;justify-content:space-between;color:var(--mut);font-weight:600;margin-bottom:8px}
 .filter{background:#1d1c1a;border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:9px 10px;width:100%;margin-bottom:10px;outline:none}
-.scene-list{overflow:auto;flex:1;min-height:0;display:flex;flex-direction:column;gap:2px;overscroll-behavior:contain;scrollbar-gutter:stable}
+.scene-list{overflow:auto;flex:1;min-height:0;display:flex;flex-direction:column;gap:2px;scrollbar-gutter:stable}
 .scene{padding:9px 10px;border-radius:8px;cursor:pointer;display:grid;grid-template-columns:14px 28px 1fr auto;gap:8px;border-left:3px solid transparent;align-items:start}
 .scene-dot{width:9px;height:9px;border-radius:50%;background:#3a3835;margin-top:5px;flex-shrink:0}
 .scene-dot.Complete{background:#7ba05b;box-shadow:0 0 6px rgba(123,160,91,.9)}
@@ -202,7 +202,6 @@ input.invalid{border-color:#e0705c!important}
 .btn.primary.danger{background:#8c2f22;border-color:#8c2f22}
 .btn.primary.danger:hover{background:#73261c}
 .modal-card{max-height:88vh;overflow:auto;overscroll-behavior:contain}
-.table-wrap{overscroll-behavior:contain}
 .main{overscroll-behavior-y:contain}
 #modal-shortcuts{z-index:70}
 .empty{text-align:center;padding:80px 20px;color:var(--mut)}
