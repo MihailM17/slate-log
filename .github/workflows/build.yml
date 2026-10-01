@@ -17,8 +17,9 @@ jobs:
           # Apple Silicon Mac
           - os: macos-latest
             args: ""
-          # Intel Mac (macos-13 is the last Intel runner)
-          - os: macos-13
+          # Intel Mac: cross-compiled on the ARM runner (macos-13 Intel
+          # runners are deprecated with effectively no capacity).
+          - os: macos-latest
             args: --target x86_64-apple-darwin
           - os: windows-latest
             args: ""
