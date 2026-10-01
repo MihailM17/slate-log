@@ -1,0 +1,123 @@
+---
+// OS-aware direct-download buttons.
+// They fetch the latest GitHub release at runtime and point straight at the
+// .dmg / -setup.exe binaries, so the user never leaves this page for GitHub.
+// Falls back to the last known release if the API is rate-limited.
+const REPO = 'MihailM17/slate-log';
+const FALLBACK = {
+  version: '0.8.3',
+  mac: {
+    label: 'Download for Mac',
+    sub: 'Apple Silicon · .dmg',
+    url: `https://github.com/${REPO}/releases/download/v0.8.3/Slate.Log_0.8.3_aarch64.dmg`,
+    size: '6.5 MB',
+  },
+  win: {
+    label: 'Download for Windows',
+    sub: 'x64 · .exe',
+    url: `https://github.com/${REPO}/releases/download/v0.8.3/Slate.Log_0.8.3_x64-setup.exe`,
+    size: '4.9 MB',
+  },
+};
+---
+
+<div class="dl-buttons" data-dl-block>
+  <div class="btns">
+    <a class="btn primary big" data-dl-primary href={FALLBACK.mac.url}>
+      <span data-dl-primary-label>{FALLBACK.mac.label}</span>
+    </a>
+    <a class="btn ghost big" data-dl-secondary href={FALLBACK.win.url}>
+      <span data-dl-secondary-label>{FALLBACK.win.label}</span>
+    </a>
+  </div>
+  <p class="fine" data-dl-meta>
+    v{FALLBACK.version} · Mac {FALLBACK.mac.size} · Windows {FALLBACK.win.size} · no account · auto-updates
+  </p>
+</div>
+
+<script define:vars={{ repo: REPO, fallback: FALLBACK }}>
+  (async () => {
+    const blocks = Array.from(document.querySelectorAll('[data-dl-block]'));
+    if (!blocks.length) return;
+
+    const ua = (navigator.userAgent || '').toLowerCase();
+    const platform = (navigator.userAgentData?.platform || navigator.platform || '').toLowerCase();
+    const isMac = ua.includes('mac') || platform.includes('mac');
+    const isWin = ua.includes('win') || platform.includes('win');
+
+    const fmtMB = (bytes) =>
+      bytes ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : '';
+
+    let info = { ...fallback };
+    try {
+      const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+        headers: { Accept: 'application/vnd.github+json' },
+      });
+      if (res.ok) {
+        const rel = await res.json();
+        const assets = rel.assets || [];
+        // Prefer Apple Silicon dmg, then any dmg
+        const macAsset =
+          assets.find((a) => a.name.endsWith('_aarch64.dmg')) ||
+          assets.find((a) => a.name.endsWith('.dmg'));
+        // Prefer NSIS setup exe, then any exe, then msi
+        const winAsset =
+          assets.find((a) => a.name.endsWith('-setup.exe')) ||
+          assets.find((a) => a.name.endsWith('.exe')) ||
+          assets.find((a) => a.name.endsWith('.msi'));
+        const version = (rel.tag_name || '').replace(/^v/, '') || fallback.version;
+        if (macAsset) {
+          info.mac = {
+            label: 'Download for Mac',
+            sub: 'Apple Silicon · .dmg',
+            url: macAsset.browser_download_url,
+            size: fmtMB(macAsset.size) || fallback.mac.size,
+          };
+        }
+        if (winAsset) {
+          info.win = {
+            label: 'Download for Windows',
+            sub: winAsset.name.endsWith('.msi') ? 'x64 · .msi' : 'x64 · .exe',
+            url: winAsset.browser_download_url,
+            size: fmtMB(winAsset.size) || fallback.win.size,
+          };
+        }
+        info.version = version;
+      }
+    } catch {
+      // keep fallback: buttons still download a known-good release
+    }
+
+    // Order buttons by OS: matching OS first
+    for (const block of blocks) {
+      const primary = block.querySelector('[data-dl-primary]');
+      const primaryLabel = block.querySelector('[data-dl-primary-label]');
+      const secondary = block.querySelector('[data-dl-secondary]');
+      const secondaryLabel = block.querySelector('[data-dl-secondary-label]');
+      const meta = block.querySelector('[data-dl-meta]');
+      if (!primary || !secondary) continue;
+
+      const first = isWin ? info.win : info.mac;
+      const second = isWin ? info.mac : info.win;
+
+      primary.setAttribute('href', first.url);
+      if (primaryLabel) primaryLabel.textContent = first.label;
+      primary.setAttribute('download', '');
+      primary.setAttribute('title', `${first.sub} · v${info.version} · ${first.size}`);
+
+      secondary.setAttribute('href', second.url);
+      if (secondaryLabel) secondaryLabel.textContent = isMac || isWin ? `${second.label} instead` : second.label;
+      secondary.setAttribute('download', '');
+
+      if (meta) {
+        meta.textContent =
+          `v${info.version} · Mac ${info.mac.size} · Windows ${info.win.size} · no account · auto-updates`;
+      }
+    }
+  })();
+</script>
+
+<style>
+  .dl-buttons .btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .dl-buttons .fine { margin-top: 14px; }
+</style>
